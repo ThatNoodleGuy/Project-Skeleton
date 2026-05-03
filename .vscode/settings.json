@@ -60,12 +60,11 @@
         "*.asset": "yaml",
         "*.meta": "yaml",
         "*.prefab": "yaml",
-        "*.unity": "yaml",
+        "*.unity": "yaml"
     },
     "explorer.fileNesting.enabled": true,
     "explorer.fileNesting.patterns": {
-        "*.sln": "*.csproj",
-        "*.slnx": "*.csproj"
+        "*.sln": "*.csproj"
     },
-    "dotnet.defaultSolution": "Project Skeleton.slnx"
+    "dotnet.defaultSolution": "Prototype_Test_Janitor.slnx"
 }
