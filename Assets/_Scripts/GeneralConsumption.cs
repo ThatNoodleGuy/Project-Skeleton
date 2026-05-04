@@ -15,8 +15,6 @@ public class GeneralConsumption : MonoBehaviour
 	private float valueToStop = 0;
 	private float valueToDrainSlow = 0.05f;
 
-
-
 	private void Start()
 	{
 		lights = GameObject.FindGameObjectsWithTag("RoomLight");
@@ -61,14 +59,26 @@ public class GeneralConsumption : MonoBehaviour
 		}
 
 	}
+
 	public void Breath()
 	{
-		StationManager.Instance.OxygenStorage.amount -= Time.deltaTime * breatheDrain;
+		float oxygenThisFrame = Time.deltaTime * breatheDrain;
+		StationManager.Instance.OxygenStorage.amount -= oxygenThisFrame;
+		RecordShiftResourcesIfActive(0f, oxygenThisFrame);
 	}
 
 	public void UsePower()
 	{
-		StationManager.Instance.PowerStorage.amount -= Time.deltaTime * powerDrain * lights.Length;
+		float powerThisFrame = Time.deltaTime * powerDrain * lights.Length;
+		StationManager.Instance.PowerStorage.amount -= powerThisFrame;
+		RecordShiftResourcesIfActive(powerThisFrame, 0f);
+	}
+
+	void RecordShiftResourcesIfActive(float powerConsumed, float oxygenConsumed)
+	{
+		StationManager sm = StationManager.Instance;
+		if (sm != null && sm.ShiftInProgress)
+			sm.CurrentShift.RecordResourcesConsumed(powerConsumed, oxygenConsumed);
 	}
 
 	public void LightsOn()

@@ -18,6 +18,7 @@ public class AIManager : MonoBehaviour
     [SerializeField] private float efficiencyWeight = 0.3f;
     [SerializeField] private float timeWeight = 0.2f;
     [SerializeField] private float safetyWeight = 0.1f;
+    [SerializeField] private float idleWeight = 0.1f;
     
     [Header("Progression")]
     [SerializeField] private int shiftsCompleted = 0;
@@ -57,13 +58,15 @@ public class AIManager : MonoBehaviour
         float efficiencyScore = CalculateEfficiencyScore(metrics);
         float timeScore = CalculateTimeScore(metrics);
         float safetyScore = CalculateSafetyScore(metrics);
+        float idleScore = CalculateIdleScore(metrics);
         
         // Weighted overall score
         evaluation.overallScore = 
             (completionScore * completionWeight) +
             (efficiencyScore * efficiencyWeight) +
             (timeScore * timeWeight) +
-            (safetyScore * safetyWeight);
+            (safetyScore * safetyWeight) +
+            (idleScore * idleWeight);
         
         // Apply strictness modifier
         evaluation.overallScore *= (1.0f / strictnessLevel);
@@ -74,7 +77,7 @@ public class AIManager : MonoBehaviour
         evaluation.efficiencyScore = efficiencyScore;
         evaluation.timeScore = timeScore;
         evaluation.safetyScore = safetyScore;
-        
+        evaluation.idleScore = idleScore;
         // Determine classification
         evaluation.classification = DetermineClassification(evaluation.overallScore);
         
@@ -89,12 +92,32 @@ public class AIManager : MonoBehaviour
     
     float CalculateCompletionScore(ShiftMetrics metrics)
     {
-        if (metrics.tasksAttempted <= 0) return 0f;
-        
-        float completionRate = (float)metrics.tasksCompleted / metrics.tasksAttempted;
-        float abandonmentPenalty = metrics.tasksAbandoned * 0.1f;
-        
-        return Mathf.Clamp01(completionRate - abandonmentPenalty);
+        bool hasRoomTasks = metrics.tasksAttempted > 0;
+        bool hasManualTasks = metrics.manualTasksAttempted > 0;
+        if (!hasRoomTasks && !hasManualTasks)
+            return 0f;
+        // Room-based score (existing behavior).
+        float roomScore = 1f;
+        if (hasRoomTasks)
+        {
+            float completionRate = (float)metrics.tasksCompleted / metrics.tasksAttempted;
+            float abandonmentPenalty = metrics.tasksAbandoned * 0.1f;
+            roomScore = Mathf.Clamp01(completionRate - abandonmentPenalty);
+        }
+        // Manual-task score: operational rate vs attempts, penalize abandoned, small bonus for perfected.
+        float manualScore = 1f;
+        if (hasManualTasks)
+        {
+            float opRate = (float)metrics.manualTasksOperational / metrics.manualTasksAttempted;
+            float abandonmentPenalty = metrics.manualTasksAbandoned * 0.1f;
+            float perfectedBonus = metrics.manualTasksPerfected * 0.02f; // tune: keep small
+            manualScore = Mathf.Clamp01(opRate - abandonmentPenalty + perfectedBonus);
+        }
+        if (hasRoomTasks && hasManualTasks)
+            return (roomScore + manualScore) * 0.5f;
+        if (hasManualTasks)
+            return manualScore;
+        return roomScore;
     }
     
     float CalculateEfficiencyScore(ShiftMetrics metrics)
@@ -127,6 +150,13 @@ public class AIManager : MonoBehaviour
         float healthPenalty = (metrics.healthLost / 100f) * 0.3f;
         
         return Mathf.Clamp01(1.0f - contaminationPenalty - healthPenalty);
+    }
+
+    float CalculateIdleScore(ShiftMetrics m)
+    {
+        float t = m.idleSeconds + m.activeSeconds;
+        if (t <= 0f) return 1f;
+        return Mathf.Clamp01(m.activeSeconds / t);
     }
     
     string DetermineClassification(float score)
@@ -176,6 +206,17 @@ public class AIManager : MonoBehaviour
             if (metrics.healthLost > 0)
                 msg += $"Health Damage: {metrics.healthLost:F0} units\n";
         }
+
+        // Manual task performance
+        if (metrics.manualTasksAttempted > 0)
+        {
+            msg += $"\nMANUAL TASK PERFORMANCE\n";
+            msg += $"Manual Tasks Attempted: {metrics.manualTasksAttempted}\n";
+            msg += $"Reached Operational: {metrics.manualTasksOperational}\n";
+            msg += $"Perfected: {metrics.manualTasksPerfected}\n";
+            if (metrics.manualTasksAbandoned > 0)
+                msg += $"Manual Tasks Abandoned: {metrics.manualTasksAbandoned}\n";
+        }
         
         return msg;
     }
@@ -212,6 +253,16 @@ public class AIManager : MonoBehaviour
         if (metrics.tasksAbandoned > metrics.tasksCompleted)
         {
             observations.Add("Note: High task abandonment ratio detected.");
+        }
+
+        if (metrics.manualTasksAttempted > 0 && metrics.manualTasksAbandoned > metrics.manualTasksOperational)
+        {
+            observations.Add("Note: Multiple manual work engagements did not reach minimum completion standard.");
+        }
+
+        if (metrics.manualTasksPerfected > 0 && metrics.manualTasksOperational == metrics.manualTasksPerfected)
+        {
+            observations.Add("Note: All completed manual tasks reached full quality threshold.");
         }
         
         return observations;
@@ -272,6 +323,7 @@ public class ShiftEvaluation
     public float efficiencyScore;
     public float timeScore;
     public float safetyScore;
+    public float idleScore;
     public string classification;
     public string message;
     public List<string> observations = new List<string>();

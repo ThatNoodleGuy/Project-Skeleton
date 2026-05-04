@@ -8,6 +8,8 @@ public class PB_CreateRoomWithDoor : EditorWindow
 {
     public enum WallSide { North, South, East, West } // North=+Z, South=-Z, East=+X, West=-X
 
+    public Material wallMaterial;
+
     private Vector3 roomSize = new Vector3(10f, 3f, 10f); // width(X), height(Y), depth(Z)
     private float wallThickness = 0.25f;
 
@@ -24,6 +26,7 @@ public class PB_CreateRoomWithDoor : EditorWindow
 
         roomSize = EditorGUILayout.Vector3Field("Room Size (X,Y,Z)", roomSize);
         wallThickness = EditorGUILayout.FloatField("Wall Thickness", wallThickness);
+        wallMaterial = EditorGUILayout.ObjectField("Wall Material", wallMaterial, typeof(Material), false) as Material;
 
         GUILayout.Space(6);
         doorWall = (WallSide)EditorGUILayout.EnumPopup("Door Wall", doorWall);
@@ -50,7 +53,8 @@ public class PB_CreateRoomWithDoor : EditorWindow
             doorWall: doorWall,
             doorWidth: doorWidth,
             doorHeight: doorHeight,
-            parent: root.transform
+            parent: root.transform,
+            wallMaterial: wallMaterial
         );
 
         Selection.activeGameObject = root;
@@ -65,8 +69,15 @@ public class PB_CreateRoomWithDoor : EditorWindow
         WallSide doorWall,
         float doorWidth,
         float doorHeight,
-        Transform parent)
+        Transform parent,
+        Material wallMaterial)
     {
+        if (wallMaterial == null)
+        {
+            Debug.LogError("Wall material is not set");
+            return;
+        }
+
         var container = new GameObject(namePrefix);
         container.transform.SetParent(parent, false);
         container.transform.localPosition = center;
@@ -76,8 +87,8 @@ public class PB_CreateRoomWithDoor : EditorWindow
         float halfZ = size.z * 0.5f;
 
         // Floor & ceiling (positioned so inner surfaces align with room boundaries)
-        CreatePBBox($"{namePrefix}_Floor", new Vector3(0f, -halfY - thickness * 0.5f, 0f), new Vector3(size.x, thickness, size.z), container.transform);
-        CreatePBBox($"{namePrefix}_Ceiling", new Vector3(0f, +halfY + thickness * 0.5f, 0f), new Vector3(size.x, thickness, size.z), container.transform);
+        CreatePBBox($"{namePrefix}_Floor", new Vector3(0f, -halfY - thickness * 0.5f, 0f), new Vector3(size.x, thickness, size.z), container.transform, wallMaterial);
+        CreatePBBox($"{namePrefix}_Ceiling", new Vector3(0f, +halfY + thickness * 0.5f, 0f), new Vector3(size.x, thickness, size.z), container.transform, wallMaterial);
 
         // West/East walls (±X) span FULL Z depth
         if (doorWall == WallSide.West)
@@ -85,18 +96,20 @@ public class PB_CreateRoomWithDoor : EditorWindow
                 wallCenterLocal: new Vector3(-halfX + thickness * 0.5f, 0f, 0f),
                 span: size.z, height: size.y, thickness: thickness,
                 holeWidth: doorWidth, holeHeight: doorHeight,
-                wallAxisIsXSpan: false);
+                wallAxisIsXSpan: false,
+                wallMaterial: wallMaterial);
         else
-            CreatePBBox($"{namePrefix}_Wall_West", new Vector3(-halfX + thickness * 0.5f, 0f, 0f), new Vector3(thickness, size.y, size.z), container.transform);
+            CreatePBBox($"{namePrefix}_Wall_West", new Vector3(-halfX + thickness * 0.5f, 0f, 0f), new Vector3(thickness, size.y, size.z), container.transform, wallMaterial);
 
         if (doorWall == WallSide.East)
             CreateWallWithDoorGap($"{namePrefix}_Wall_East", container.transform,
                 wallCenterLocal: new Vector3(+halfX - thickness * 0.5f, 0f, 0f),
                 span: size.z, height: size.y, thickness: thickness,
                 holeWidth: doorWidth, holeHeight: doorHeight,
-                wallAxisIsXSpan: false);
+                wallAxisIsXSpan: false,
+                wallMaterial: wallMaterial);
         else
-            CreatePBBox($"{namePrefix}_Wall_East", new Vector3(+halfX - thickness * 0.5f, 0f, 0f), new Vector3(thickness, size.y, size.z), container.transform);
+            CreatePBBox($"{namePrefix}_Wall_East", new Vector3(+halfX - thickness * 0.5f, 0f, 0f), new Vector3(thickness, size.y, size.z), container.transform, wallMaterial);
 
         // South/North walls (±Z) span REDUCED X width (to fit between East/West walls)
         float reducedWidth = size.x - 2f * thickness;
@@ -106,18 +119,20 @@ public class PB_CreateRoomWithDoor : EditorWindow
                 wallCenterLocal: new Vector3(0f, 0f, -halfZ + thickness * 0.5f),
                 span: reducedWidth, height: size.y, thickness: thickness,
                 holeWidth: doorWidth, holeHeight: doorHeight,
-                wallAxisIsXSpan: true);
+                wallAxisIsXSpan: true,
+                wallMaterial: wallMaterial);
         else
-            CreatePBBox($"{namePrefix}_Wall_South", new Vector3(0f, 0f, -halfZ + thickness * 0.5f), new Vector3(reducedWidth, size.y, thickness), container.transform);
+            CreatePBBox($"{namePrefix}_Wall_South", new Vector3(0f, 0f, -halfZ + thickness * 0.5f), new Vector3(reducedWidth, size.y, thickness), container.transform, wallMaterial);
 
         if (doorWall == WallSide.North)
             CreateWallWithDoorGap($"{namePrefix}_Wall_North", container.transform,
                 wallCenterLocal: new Vector3(0f, 0f, +halfZ - thickness * 0.5f),
                 span: reducedWidth, height: size.y, thickness: thickness,
                 holeWidth: doorWidth, holeHeight: doorHeight,
-                wallAxisIsXSpan: true);
+                wallAxisIsXSpan: true,
+                wallMaterial: wallMaterial);
         else
-            CreatePBBox($"{namePrefix}_Wall_North", new Vector3(0f, 0f, +halfZ - thickness * 0.5f), new Vector3(reducedWidth, size.y, thickness), container.transform);
+            CreatePBBox($"{namePrefix}_Wall_North", new Vector3(0f, 0f, +halfZ - thickness * 0.5f), new Vector3(reducedWidth, size.y, thickness), container.transform, wallMaterial);
     }
 
     /// <summary>
@@ -136,8 +151,15 @@ public class PB_CreateRoomWithDoor : EditorWindow
         float thickness,
         float holeWidth,
         float holeHeight,
-        bool wallAxisIsXSpan)
+        bool wallAxisIsXSpan,
+        Material wallMaterial)
     {
+        if (wallMaterial == null)
+        {
+            Debug.LogError("Wall material is not set");
+            return;
+        }
+
         holeWidth = Mathf.Clamp(holeWidth, 0.5f, span - 0.5f);
         holeHeight = Mathf.Clamp(holeHeight, 1.0f, height - 0.2f);
 
@@ -165,7 +187,7 @@ public class PB_CreateRoomWithDoor : EditorWindow
                 ? new Vector3(leftWidth, height, thickness)
                 : new Vector3(thickness, height, leftWidth);
 
-            CreatePBBox($"{wallName}_Left", wallCenterLocal + SpanOffset(centerS, 0f), segSize, parent);
+            CreatePBBox($"{wallName}_Left", wallCenterLocal + SpanOffset(centerS, 0f), segSize, parent, wallMaterial);
         }
 
         // Right segment
@@ -176,7 +198,7 @@ public class PB_CreateRoomWithDoor : EditorWindow
                 ? new Vector3(rightWidth, height, thickness)
                 : new Vector3(thickness, height, rightWidth);
 
-            CreatePBBox($"{wallName}_Right", wallCenterLocal + SpanOffset(centerS, 0f), segSize, parent);
+            CreatePBBox($"{wallName}_Right", wallCenterLocal + SpanOffset(centerS, 0f), segSize, parent, wallMaterial);
         }
 
         // Top lintel
@@ -186,11 +208,16 @@ public class PB_CreateRoomWithDoor : EditorWindow
                 ? new Vector3(holeWidth, topHeight, thickness)
                 : new Vector3(thickness, topHeight, holeWidth);
 
-            CreatePBBox($"{wallName}_Top", wallCenterLocal + SpanOffset(0f, lintelCenterY), lintelSize, parent);
+            CreatePBBox($"{wallName}_Top", wallCenterLocal + SpanOffset(0f, lintelCenterY), lintelSize, parent, wallMaterial);
         }
     }
 
-    private static GameObject CreatePBBox(string name, Vector3 localPos, Vector3 localSize, Transform parent)
+    private static GameObject CreatePBBox(
+        string name,
+        Vector3 localPos,
+        Vector3 localSize,
+        Transform parent,
+        Material wallMaterial)
     {
         ProBuilderMesh pb = ShapeGenerator.GenerateCube(PivotLocation.Center, localSize);
         pb.gameObject.name = name;
@@ -202,6 +229,11 @@ public class PB_CreateRoomWithDoor : EditorWindow
 
         pb.ToMesh();
         pb.Refresh();
+        if (wallMaterial != null)
+        {
+            MeshRenderer mr = pb.gameObject.GetComponent<MeshRenderer>();
+            mr.sharedMaterial = wallMaterial;
+        }
         return pb.gameObject;
     }
 }

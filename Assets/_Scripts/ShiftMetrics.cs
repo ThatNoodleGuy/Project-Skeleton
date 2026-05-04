@@ -20,17 +20,45 @@ public class ShiftMetrics
     [Header("Time Tracking")]
     public float shiftStartTime = 0f;
     public float shiftEndTime = 0f;
+
+    [Header("Idle / activity (optional)")]
+    public float idleSeconds;
+    public float activeSeconds;
+    public float idleThresholdSeconds = 2f; // no activity this long => idle chunk
+    private float lastActivityTime;
     
     [Header("Safety & Risk")]
     public int contaminationEvents = 0;
     public float healthLost = 0f;
     public int timerExpirations = 0;  // Times timer hit 0
+
+    [Header("Manual Tasks (hold-to-work, etc.) — separate from room tasks")]
+    /// <summary>
+    /// Distinct manual tasks the player started this shift (see RecordTaskAttempted).
+    /// </summary>
+    public int manualTasksAttempted = 0;
+    /// <summary>
+    /// How many of those reached at least "operational" threshold (e.g. ~75%).
+    /// </summary>
+    public int manualTasksOperational = 0;
+    /// <summary>
+    /// How many reached "perfected" (e.g. 100%) — should be &lt;= operational.
+    /// </summary>
+    public int manualTasksPerfected = 0;
+    /// <summary>Filled in EndShift via FinalizeManualTasksForEvaluation: started but never operational.</summary>
+    public int manualTasksAbandoned = 0;
     
     // Internal tracking
     private HashSet<RoomController.RoomType> roomsEntered = new HashSet<RoomController.RoomType>();
     private HashSet<RoomController.RoomType> roomsCompleted = new HashSet<RoomController.RoomType>();
     private Dictionary<RoomController.RoomType, float> roomTimeSpent = new Dictionary<RoomController.RoomType, float>();
     private Dictionary<RoomController.RoomType, float> roomEntryTime = new Dictionary<RoomController.RoomType, float>();
+
+    // --- Manual task tracking (per stable task id, e.g. gameObject name or serialized id) ---
+    /// <summary>Task ids that have had RecordTaskAttempted at least once this shift.</summary>
+    private HashSet<string> manualTaskIdsStarted = new HashSet<string>();
+    private HashSet<string> manualTasksReachedOperationalIds = new HashSet<string>();
+    private HashSet<string> manualTasksReachedPerfectedIds = new HashSet<string>();
     
     /// <summary>
     /// Initialize a new shift
@@ -39,6 +67,10 @@ public class ShiftMetrics
     {
         shiftStartTime = Time.time;
         shiftEndTime = 0f;
+
+        idleSeconds = 0f;
+        activeSeconds = 0f;
+        lastActivityTime = Time.time;
         
         tasksAttempted = 0;
         tasksCompleted = 0;
@@ -50,11 +82,20 @@ public class ShiftMetrics
         contaminationEvents = 0;
         healthLost = 0f;
         timerExpirations = 0;
+
+        manualTasksAttempted = 0;
+        manualTasksOperational = 0;
+        manualTasksPerfected = 0;
+        manualTasksAbandoned = 0;
         
         roomsEntered.Clear();
         roomsCompleted.Clear();
         roomTimeSpent.Clear();
         roomEntryTime.Clear();
+
+        manualTaskIdsStarted.Clear();
+        manualTasksReachedOperationalIds.Clear();
+        manualTasksReachedPerfectedIds.Clear();
         
         Debug.Log("[ShiftMetrics] Shift initialized");
     }
@@ -71,6 +112,8 @@ public class ShiftMetrics
         tasksAbandoned = roomsEntered.Count - roomsCompleted.Count;
         
         Debug.Log($"[ShiftMetrics] Shift ended: {GetShiftDuration():F1}s, Score: {GetCompletionRate():P0}");
+
+        FinalizeManualTasksForEvaluation();
     }
     
     /// <summary>
@@ -161,6 +204,74 @@ public class ShiftMetrics
     {
         moneyEarned += amount;
     }
+
+        /// <summary>
+    /// Call when the player begins a manual task (first interaction / minigame start).
+    /// taskId should be stable for this object for the whole shift (name, GUID string, or serialized field).
+    /// Only the first attempt per id per shift increments manualTasksAttempted.
+    /// </summary>
+    public void RecordTaskAttempted(string taskId)
+    {
+        if (string.IsNullOrEmpty(taskId))
+            taskId = "unknown_manual_task";
+        if (manualTaskIdsStarted.Add(taskId))
+            manualTasksAttempted = manualTaskIdsStarted.Count;
+    }
+
+    /// <summary>
+    /// Call when progress crosses your "operational" threshold (~75% in design docs).
+    /// Counts at most once per taskId per shift.
+    /// </summary>
+    public void RecordTaskOperational(string taskId)
+    {
+        if (string.IsNullOrEmpty(taskId))
+            taskId = "unknown_manual_task";
+        if (manualTasksReachedOperationalIds.Add(taskId))
+            manualTasksOperational++;
+    }
+
+    /// <summary>
+    /// Call when the player reaches "perfect" completion (100%).
+    /// Implies operational if that was not recorded yet.
+    /// Counts at most once per taskId per shift.
+    /// </summary>
+    public void RecordTaskPerfected(string taskId)
+    {
+        if (string.IsNullOrEmpty(taskId))
+            taskId = "unknown_manual_task";
+        // Perfected implies operational for scoring and abandonment logic.
+        RecordTaskOperational(taskId);
+        if (manualTasksReachedPerfectedIds.Add(taskId))
+            manualTasksPerfected++;
+    }
+
+    /// <summary>
+    /// Run once when the shift ends, before AI reads metrics.
+    /// Abandoned = started this shift but never reached operational.
+    /// </summary>
+    public void FinalizeManualTasksForEvaluation()
+    {
+        manualTasksAbandoned = 0;
+        foreach (string id in manualTaskIdsStarted)
+        {
+            if (!manualTasksReachedOperationalIds.Contains(id))
+                manualTasksAbandoned++;
+        }
+    }
+
+    public void NotifyPlayerActivity()
+    {
+        lastActivityTime = Time.time;
+    }
+
+    /// <summary>Call once per frame from StationManager.Update while shift active.</summary>
+    public void AccumulateIdleTime(float deltaTime)
+    {
+        if (Time.time - lastActivityTime > idleThresholdSeconds)
+            idleSeconds += deltaTime;
+        else
+            activeSeconds += deltaTime;
+    }
     
     // ===== CALCULATIONS =====
     
@@ -243,7 +354,8 @@ public class ShiftMetrics
         summary += $"Efficiency: {GetEfficiencyRatio():F2}:1\n";
         summary += $"Safety: {contaminationEvents} violations, {healthLost:F0} damage\n";
         summary += $"Perfect: {IsPerfectShift()}\n";
-        
+        summary += $"Manual Tasks: {manualTasksAttempted} attempted, {manualTasksOperational} operational, {manualTasksPerfected} perfected, {manualTasksAbandoned} abandoned\n";
+
         return summary;
     }
 }

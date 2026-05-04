@@ -6,6 +6,31 @@
 - This document only **describes** what to add or change. **Do not assume any of it is already applied** unless you have done it yourself.
 - Pair with `PORTFOLIO_CONTEXT.md` for narrative and portfolio framing.
 
+**Convention — “Where to put it”**
+
+- Each numbered step uses a **Where to put it** block: **after / before** a named method, comment region, or line so you can find the right place in your copy of the repo without guessing.
+- If your file structure differs, search for the **anchor** (e.g. `public void StartShift()` in `StationManager.cs`) and apply the snippet there.
+
+### Implementation status — janitor prototype (verify in Unity after pull)
+
+Use this row to see **what this guide’s reference tree already contains in code** vs what is still **documentation-only** or **Inspector/scene** work. Your branch may differ.
+
+| Step | Code / assets (approximate) |
+|------|-----------------------------|
+| **1** | **Done** — `GeneralConsumption` calls `RecordShiftResourcesIfActive` → `CurrentShift.RecordResourcesConsumed` when `ShiftInProgress`. |
+| **2** | **Done** — `TaskBehavior`, `ResetForNewShift`, `StationManager.ResetAllTaskBehaviorsForNewShift`. |
+| **3** | **Done** — `ShiftMetrics` manual counters + `FinalizeManualTasksForEvaluation` in `EndShift`. |
+| **4** | **Done** — idle fields, `NotifyPlayerActivity` / `AccumulateIdleTime`, `AIManager` idle weight + score. |
+| **5** | **Done** — `LogRegisteredManualTasks()` after `ResetAllTaskBehaviorsForNewShift()` in `StartShift`. |
+| **6** | **Partial** — `ShiftTerminalUI.cs` and `StationManager.OnAcceptShiftClicked` exist; scene may still wire **`startBtnUI`** as well — avoid double **Accept**. |
+| **6.5** | **A–C done** in reference code; **D** points to **Step 7** (still open). |
+| **7** | **Not in code** — `ShiftEvaluationUI` sets full report string at once; no `TypewriteReport` / `WaitForSecondsRealtime` yet. |
+| **8** | **Not in code** — `AIManager.CalculateTimeScore` still hard-codes `600f`; `StationManager.ShiftDurationSeconds` exists for a future wire-up. |
+| **9** | **Not in code** — no `ITaskActor` / `PlayerTaskActor` in reference tree. |
+| **10** | **Optional** — root `README.md` when you ship publicly. |
+
+**Also in reference tree:** `Assets/_Scripts/Tasks/CleaningTask.cs` (minimal subclass of `TaskBehavior`).
+
 ---
 
 ## Before Step 0 — Last push vs what you should have (git + file checklist)
@@ -43,13 +68,13 @@ Some clones only have the **baseline** shift/AI loop (`StationManager`, `ShiftMe
 
 | Path | If present, you have… |
 |------|------------------------|
-| `Assets/_Scripts/Tasks/TaskBehavior.cs` | Manual task base (threshold / progress hooks). |
-| `Assets/_Scripts/Tasks/CleaningTask.cs` | Example hold-to-clean task. |
+| `Assets/_Scripts/Tasks/TaskBehavior.cs` | Manual task base — **canonical behavior** is defined in this script (hold interact, optional soft cancel, `ShiftMetrics` hooks). See **Step 2**. |
+| `Assets/_Scripts/Tasks/CleaningTask.cs` | Example subclass for VFX/UI — **present** in reference janitor tree (`OnProgressChanged` / `OnTaskPerfected` hooks). |
 | `Assets/Editor/PrototypeSetupHelper.cs` | Editor menu to spawn an example task (if you added it). |
 
-**In `ShiftMetrics.cs`, search for:** `manualTasksAttempted`, `RecordTaskAttempted`, `RecordTaskOperational`, `RecordTaskPerfected`. If those strings are missing, metrics are still **room/puzzle-centric** only until you add them (or re-apply them from your other copy).
+**In `ShiftMetrics.cs`, search for:** `manualTasksAttempted`, `RecordTaskAttempted`, `RecordTaskOperational`, `RecordTaskPerfected`, `FinalizeManualTasksForEvaluation`. If those strings are missing, metrics are still **room/puzzle-centric** only until you add them (or re-apply them from your other copy).
 
-**In `AIManager.cs`, search for:** `manualTasks` in `CalculateCompletionScore` / report text. If missing, the AI is not yet merging manual-task stats into the written evaluation.
+**In `AIManager.cs`, search for:** `manualTasks` / `manualTasksAttempted` in `CalculateCompletionScore` / report text. If missing, the AI is not yet merging manual-task stats into the written evaluation.
 
 ### If this clone is *behind* the machine where you did more work
 
@@ -81,9 +106,16 @@ Then **`origin/main` is your baseline**; anything not in git is **extra** you mu
 - `Assets/_Scripts/GeneralConsumption.cs` (or any central place that applies drain every frame)
 - Optionally `Assets/_Scripts/StationManager.cs` if you prefer a single “record drain” API
 
+**Where to put it**
+
+- **`GeneralConsumption.cs`**
+  - In **`Breath()`**: **after** you apply the oxygen delta to storage (the line that does `OxygenStorage.amount -= …`), compute **`oxygenDeltaThisFrame = Time.deltaTime * breatheDrain`** (or the same value you subtracted) and call **`RecordResourcesConsumed`** with **`0f`** for power and that value for oxygen—or pass **`power, oxygen`** as two positives matching what you subtracted this frame only.
+  - In **`UsePower()`**: **after** you apply the power delta, same idea: record **`powerDeltaThisFrame`** (e.g. `Time.deltaTime * powerDrain * lights.Length`) and **`0f`** for oxygen, or combine in **`Update()`** once per frame if you prefer one call.
+- **Guard every call:** only if `StationManager.Instance != null && StationManager.Instance.ShiftInProgress`.
+
 **Drop-in behavior (no new class required)**
 
-- After you compute **how much** power and oxygen were consumed **this frame** (or this tick), if `StationManager.Instance != null && StationManager.Instance.ShiftInProgress`, call:
+- After you know **how much** power and oxygen were consumed **this frame**, call:
 
 ```csharp
 StationManager.Instance.CurrentShift.RecordResourcesConsumed(powerDeltaThisFrame, oxygenDeltaThisFrame);
@@ -99,53 +131,205 @@ StationManager.Instance.CurrentShift.RecordResourcesConsumed(powerDeltaThisFrame
 
 - During Play, with a shift running, confirm `resourcesConsumed` increases in logs or a temporary inspector/debug view before shift end.
 
----
-
-## Step 2 — `TaskBehavior`: optional cancel key (doc parity)
-
-**Goal:** Match the design-doc idea that the player can **release** or **cancel** mid-task (guides mention **SPACE**; your code today is **hold E** only).
-
-**Files to touch**
-
-- `Assets/_Scripts/Tasks/TaskBehavior.cs`
-
-**Drop-in methods / fields (suggested shape)**
-
-- Serialized keys or a small `KeyCode cancelKey = KeyCode.Space;`
-- A protected virtual method, e.g. `protected virtual void HandleCancelInput()`, called from `Update()` when `isPlayerInRange` is true.
-- Behavior options (pick one and document it in a comment):
-  - **Soft cancel:** stop adding progress while SPACE is held; resume on release.
-  - **Hard cancel:** reset progress, or mark abandonment (requires Step 3 metrics).
-
-**Verify**
-
-- Hold E to progress, tap or hold SPACE per your chosen rule; progress and metrics still make sense.
+**Reference tree:** Step **1** is implemented via **`RecordShiftResourcesIfActive`** in `GeneralConsumption.cs` (same pattern as **§6.5 A**).
 
 ---
 
-## Step 3 — Abandonment metrics for manual tasks (operational threshold story)
+## Step 2 — Manual tasks: `TaskBehavior` (reference implementation)
 
-**Goal:** If the player **starts** a manual task (`RecordTaskAttempted`) but ends the shift **without** reaching operational, the AI should be able to treat that as abandonment (doc pillar).
+**Goal:** In-scene **hold-to-work** tasks that report **operational** (~75%) and **perfected** (100%) into `ShiftMetrics`, separate from room/puzzle counters. The **source of truth** for behavior is `Assets/_Scripts/Tasks/TaskBehavior.cs` — this step is **scene + tuning**, not a second spec.
 
-**Files to touch**
+**Where to put it (class file)**
 
-- `Assets/_Scripts/ShiftMetrics.cs`
-- `Assets/_Scripts/StationManager.cs` (`EndShift` or right after `currentShift.EndShift()`)
+- **`Assets/_Scripts/Tasks/TaskBehavior.cs`** — create the **`Tasks`** folder under **`_Scripts`** if needed. If you use a **`CleaningTask`** subclass, place it in the same folder.
 
-**Drop-in data (suggested)**
+**What the class already does**
 
-- Track attempted task names (e.g. `HashSet<string>` or a small list of task ids) vs which reached operational / perfected.
-- Add methods such as:
-  - `void RegisterManualTaskAttempt(string taskName)` (may alias existing `RecordTaskAttempted` if you unify)
-  - `void FinalizeManualTasksForEvaluation()` — called once when the shift ends: compute how many attempts never hit operational and feed `tasksAbandoned` or a **new** counter `manualTasksAbandoned` so room-based abandonment stays separate.
+- **Range:** `OnTriggerEnter` / `OnTriggerExit` with **`Player`** tag; collider should be **Is Trigger** (`[RequireComponent(typeof(Collider))]`).
+- **Interaction:** Hold **`interactKey`** (default **E**). While in range and shift active, fills **0 → 1** progress at **`progressPerSecond`**.
+- **Thresholds:** At **`operationalThreshold`** (default **0.75**), calls `CurrentShift.RecordTaskOperational(ResolveTaskId())`. At **1**, calls `RecordTaskPerfected` and stops.
+- **Attempt:** On first qualifying hold, calls `RecordTaskAttempted` (task id = **`uniqueTaskId`** if set, else `"{name}_{GetInstanceID()}"`).
+- **Soft cancel (doc parity):** If **`useSoftCancel`**, holding **`cancelKey`** (default **Space**) **pauses** progress while **E** stays held; release Space to resume. No separate `HandleCancelInput()` — logic is inline in `Update`.
+- **Hooks for subclasses:** `CanReceiveInput()`, `OnProgressChanged`, `OnTaskOperational`, `OnTaskPerfected` (e.g. `CleaningTask` for UI/VFX).
+- **Leave trigger:** If the task is not complete, **progress resets** and the attempt flag clears (re-entry can log another attempt; `ShiftMetrics` still dedupes by **task id** per shift).
 
-**Drop-in call site**
+**Scene setup**
 
-- From `StationManager.EndShift()` **before** `aiManager.EvaluateShift(currentShift)`, call your finalize method.
+1. Add **TaskBehavior** (or subclass) on a GameObject with a **trigger** collider.
+2. Ensure the **player** has tag **`Player`** (same as `RoomController`). Add a **kinematic Rigidbody** on the player if triggers never fire with **CharacterController**.
+3. **Start a shift** before expecting metrics; `TaskBehavior` only records when `StationManager.Instance.ShiftInProgress`.
+
+**Multi-shift loop (drop-in)**
+
+After **`taskCompleted`**, the task stays finished until reset. **`TaskBehavior`** includes **`ResetForNewShift()`**; **`StationManager.StartShift()`** in this repo calls **`ResetAllTaskBehaviorsForNewShift()`** right after **`currentShift.StartShift()`**. If your clone is older, paste:
+
+**Where to put it**
+
+| Snippet | File | Placement |
+|--------|------|-----------|
+| **`ResetForNewShift()`** | `Assets/_Scripts/Tasks/TaskBehavior.cs` | **After** the closing `}` of **`OnTriggerExit`** (or **`OnValidate`** `#endif` block at file end). **Before** `#if UNITY_EDITOR` if you use that guard at the bottom. |
+| Two method calls | `Assets/_Scripts/StationManager.cs` | Inside **`public void StartShift()`**, **immediately after** `currentShift.StartShift();` and **before** `shiftInProgress = true;` (either order with `shiftInProgress` is fine; repo uses reset **after** `StartShift` on metrics and **before** UI updates). |
+| **`ResetAllTaskBehaviorsForNewShift`** + **`LogRegisteredManualTasks`** + **`FindTasksInScene`** | `StationManager.cs` | **After** the closing `}` of **`StartShift()`**, **before** **`public void EndShift()`** (same region as other shift helpers). |
+
+`TaskBehavior.cs` — add to the class (or compare with repo):
+
+```csharp
+/// <summary>
+/// Call when a new shift starts so tasks can be completed again.
+/// </summary>
+public virtual void ResetForNewShift()
+{
+    progress = 0f;
+    taskCompleted = false;
+    hasLoggedAttemptThisShift = false;
+}
+```
+
+`StationManager.cs` — inside **`StartShift()`**, after **`currentShift.StartShift();`**:
+
+```csharp
+ResetAllTaskBehaviorsForNewShift();
+LogRegisteredManualTasks(); // optional; remove if you do not want the Step 5 log
+```
+
+`StationManager.cs` — add these members (same file):
+
+```csharp
+void ResetAllTaskBehaviorsForNewShift()
+{
+    TaskBehavior[] tasks = FindTasksInScene();
+    for (int i = 0; i < tasks.Length; i++)
+    {
+        if (tasks[i] != null)
+            tasks[i].ResetForNewShift();
+    }
+}
+
+void LogRegisteredManualTasks()
+{
+    TaskBehavior[] tasks = FindTasksInScene();
+    if (tasks.Length == 0)
+    {
+        Debug.Log("[StationManager] Registered manual tasks: 0");
+        return;
+    }
+    var names = new System.Collections.Generic.List<string>(tasks.Length);
+    for (int i = 0; i < tasks.Length; i++)
+    {
+        if (tasks[i] != null)
+            names.Add(tasks[i].gameObject.name);
+    }
+    Debug.Log($"[StationManager] Registered manual tasks: {names.Count} — {string.Join(", ", names)}");
+}
+
+static TaskBehavior[] FindTasksInScene()
+{
+#if UNITY_6000_0_OR_NEWER
+    return FindObjectsByType<TaskBehavior>(FindObjectsSortMode.None);
+#else
+    return FindObjectsOfType<TaskBehavior>();
+#endif
+}
+```
+
+**Optional extensions (not in the base script)**
+
+- **Hard cancel:** in **`Update()`**, when **`isPlayerInRange`** and **`Input.GetKeyDown(KeyCode.Escape)`** (or your key), set **`progress = 0f`** (and optionally reset **`hasLoggedAttemptThisShift`** if you want a new “attempt”).
+- **`ITaskActor`:** see **Step 9**.
 
 **Verify**
 
-- Start a cleaning task, stop before 75%, end shift: evaluation or summary reflects abandonment.
+- With shift running: enter trigger, hold **E**, see progress; cross 75% and 100%; hold **Space** with **E** and confirm progress pauses.
+- End shift: **manual** lines appear in evaluation if **`AIManager`** / **`ShiftMetrics`** are wired (**Step 3**).
+- Start a **second** shift: the same **`TaskBehavior`** can reach 100% again.
+
+---
+
+## Step 3 — Manual task abandonment in `ShiftMetrics` (operational threshold story)
+
+**Goal:** If the player **starts** a manual task (`RecordTaskAttempted`) but ends the shift **without** reaching operational, **`manualTasksAbandoned`** reflects that — separate from **room** `tasksAbandoned`.
+
+**Files:** `Assets/_Scripts/ShiftMetrics.cs` — ensure **`ShiftMetrics.EndShift()`** calls **`FinalizeManualTasksForEvaluation()`** after room abandonment math and **before** any code reads manual counts for the report.
+
+**Where to put it** (`ShiftMetrics.cs`)
+
+| Snippet | Placement |
+|--------|-----------|
+| Manual **fields** + **HashSets** | **After** the last existing **`[Header("Safety & Risk")]`** field block (`timerExpirations`). **Before** `// Internal tracking` (room `HashSet`s) **or** after room-only private fields—keep manual task **public** counters with the other headers. |
+| **`StartShift()`** resets | **Inside** **`public void StartShift()`**, **after** you zero **`timerExpirations`** / contamination, **before** **`roomsEntered.Clear()`** (or grouped with other per-shift clears). |
+| **`RecordTask*`** + **`Finalize*`** methods | **After** **`RecordMoneyEarned`** (or after other `Record*` methods). **Before** the `// ===== CALCULATIONS =====` region (or before **`GetShiftDuration`**). |
+| **`FinalizeManualTasksForEvaluation();`** | **Inside** **`public void EndShift()`**, **after** `tasksAbandoned = roomsEntered.Count - roomsCompleted.Count;` and **after** the **`Debug.Log`** for shift ended if you want logs to show pre-finalize counts—or **immediately before** the method’s closing `}` so it always runs. |
+
+**Drop-in — `ShiftMetrics` fields (with room metrics)**
+
+```csharp
+[Header("Manual Tasks (hold-to-work, etc.) — separate from room tasks")]
+public int manualTasksAttempted;
+public int manualTasksOperational;
+public int manualTasksPerfected;
+public int manualTasksAbandoned;
+
+private HashSet<string> manualTaskIdsStarted = new HashSet<string>();
+private HashSet<string> manualTasksReachedOperationalIds = new HashSet<string>();
+private HashSet<string> manualTasksReachedPerfectedIds = new HashSet<string>();
+```
+
+**Drop-in — clear in `StartShift()`**
+
+```csharp
+manualTasksAttempted = manualTasksOperational = manualTasksPerfected = manualTasksAbandoned = 0;
+manualTaskIdsStarted.Clear();
+manualTasksReachedOperationalIds.Clear();
+manualTasksReachedPerfectedIds.Clear();
+```
+
+**Drop-in — methods**
+
+```csharp
+public void RecordTaskAttempted(string taskId)
+{
+    if (string.IsNullOrEmpty(taskId)) taskId = "unknown_manual_task";
+    if (manualTaskIdsStarted.Add(taskId))
+        manualTasksAttempted = manualTaskIdsStarted.Count;
+}
+
+public void RecordTaskOperational(string taskId)
+{
+    if (string.IsNullOrEmpty(taskId)) taskId = "unknown_manual_task";
+    if (manualTasksReachedOperationalIds.Add(taskId))
+        manualTasksOperational++;
+}
+
+public void RecordTaskPerfected(string taskId)
+{
+    if (string.IsNullOrEmpty(taskId)) taskId = "unknown_manual_task";
+    RecordTaskOperational(taskId);
+    if (manualTasksReachedPerfectedIds.Add(taskId))
+        manualTasksPerfected++;
+}
+
+public void FinalizeManualTasksForEvaluation()
+{
+    manualTasksAbandoned = 0;
+    foreach (string id in manualTaskIdsStarted)
+    {
+        if (!manualTasksReachedOperationalIds.Contains(id))
+            manualTasksAbandoned++;
+    }
+}
+```
+
+**Drop-in — end of `EndShift()`**
+
+```csharp
+FinalizeManualTasksForEvaluation();
+```
+
+**Do not** duplicate finalize in **`StationManager`** unless **`EndShift()`** is bypassed somewhere custom.
+
+**Verify**
+
+- Start a **`TaskBehavior`**, stop before operational threshold, end shift: summary / AI text reflects **manual** abandonment.
 
 ---
 
@@ -153,16 +337,82 @@ StationManager.Instance.CurrentShift.RecordResourcesConsumed(powerDeltaThisFrame
 
 **Goal:** README-style “idle vs active” scoring; only worth it if `AIManager` will use it.
 
-**Files to touch**
+**Where to put it**
 
-- `Assets/_Scripts/ShiftMetrics.cs` — fields like `activeSeconds`, `idleSeconds` (or one `lastActivityTime`).
-- `Assets/_Scripts/Player/PlayerMovement.cs` (or input hub) — ping “activity” when movement or interaction occurs.
-- `Assets/_Scripts/AIManager.cs` — add a weight and a `CalculateIdleScore(ShiftMetrics)` if you want it in the weighted sum.
+| Snippet | File | Placement |
+|--------|------|-----------|
+| Idle **fields** | `ShiftMetrics.cs` | **After** manual-task headers/fields (**Step 3**). **Before** `// Internal tracking` or **`// ===== CALCULATIONS =====`**. |
+| Idle **`StartShift()`** resets | `ShiftMetrics.cs` | **End** of **`StartShift()`**, **before** `Debug.Log("[ShiftMetrics] Shift initialized");`. |
+| **`NotifyPlayerActivity`** / **`AccumulateIdleTime`** | `ShiftMetrics.cs` | With other **`Record*`** methods (**before** `// ===== CALCULATIONS =====`). |
+| **`AccumulateIdleTime`** call | `StationManager.cs` | **`void Update()`**, inside **`if (shiftInProgress)`** (same block as **`UpdateShiftTimer()`**). **After** `UpdateShiftTimer();` is a stable anchor. |
+| Movement **notify** | `PlayerMovement.cs` | **`HandleMovementInput()`**, **after** `horizontal` / `vertical` are read from **`Input.GetAxis`**. **Before** **`inputDirection`** / **`targetVelocity`** math. |
+| **`idleWeight`** + **`CalculateIdleScore`** | `AIManager.cs` | New **`SerializeField`** with other weights at top of class. **`CalculateIdleScore`** **after** **`CalculateSafetyScore`** (or near other **`Calculate*Score`** helpers). Blend into **`EvaluateShift`** **after** sub-scores are computed **and** **before** **`DetermineClassification`**. |
 
-**Drop-in methods (suggested)**
+**Drop-in — `ShiftMetrics` fields**
 
-- `public void NotifyPlayerActivity()` — updates last activity timestamp.
-- `public void AccumulateIdleTime(float deltaTime)` — called from a single place each frame while shift is active (often `StationManager.Update`).
+```csharp
+[Header("Idle / activity (optional)")]
+public float idleSeconds;
+public float activeSeconds;
+public float idleThresholdSeconds = 2f; // no activity this long => idle chunk
+private float lastActivityTime;
+```
+
+**Drop-in — `ShiftMetrics` methods**
+
+```csharp
+public void NotifyPlayerActivity()
+{
+    lastActivityTime = Time.time;
+}
+
+/// <summary>Call once per frame from StationManager.Update while shift active.</summary>
+public void AccumulateIdleTime(float deltaTime)
+{
+    if (Time.time - lastActivityTime > idleThresholdSeconds)
+        idleSeconds += deltaTime;
+    else
+        activeSeconds += deltaTime;
+}
+```
+
+**Drop-in — `StartShift()` reset**
+
+```csharp
+idleSeconds = 0f;
+activeSeconds = 0f;
+lastActivityTime = Time.time;
+```
+
+**Drop-in — `StationManager.Update()`** (inside `if (shiftInProgress)` branch, after timer logic is fine):
+
+```csharp
+if (currentShift != null)
+    currentShift.AccumulateIdleTime(Time.deltaTime);
+```
+
+**Drop-in — `PlayerMovement` (or input hub)** after you detect movement intent:
+
+```csharp
+if (Mathf.Abs(horizontal) > 0.01f || Mathf.Abs(vertical) > 0.01f)
+{
+    if (StationManager.Instance != null && StationManager.Instance.ShiftInProgress)
+        StationManager.Instance.CurrentShift.NotifyPlayerActivity();
+}
+```
+
+**Drop-in — `AIManager`**: add **`[SerializeField] private float idleWeight = 0.1f;`**, subtract it from the weight sum you use elsewhere or add:
+
+```csharp
+float CalculateIdleScore(ShiftMetrics m)
+{
+    float t = m.idleSeconds + m.activeSeconds;
+    if (t <= 0f) return 1f;
+    return Mathf.Clamp01(m.activeSeconds / t);
+}
+```
+
+Then blend **`CalculateIdleScore(metrics)`** into **`evaluation.overallScore`** the same way as other sub-scores.
 
 **Verify**
 
@@ -172,102 +422,384 @@ StationManager.Instance.CurrentShift.RecordResourcesConsumed(powerDeltaThisFrame
 
 ## Step 5 — Task registry & discovery (“Registered X tasks”)
 
-**Goal:** Optional debug parity with old docs: one log line on shift start listing evaluate-able tasks in the scene.
+**Goal:** One log line on shift start listing **`TaskBehavior`** instances.
 
-**Approach A — lightweight (recommended first)**
+**Where to put it**
 
-- New class `TaskRegistry` **or** static helper on `StationManager`:
-  - `void LogRegisteredTasks()` using `FindObjectsByType<TaskBehavior>(FindObjectsSortMode.None)` (Unity 6) or `FindObjectsOfType<TaskBehavior>()`.
-- Call from `StationManager.StartShift()` after `currentShift.StartShift()`.
+- **`StationManager.StartShift()`**: **after** **`ResetAllTaskBehaviorsForNewShift();`** (or **after** **`currentShift.StartShift();`** if you only want the log). Remove **`LogRegisteredManualTasks();`** to silence the console.
+- Helpers live in **`StationManager.cs`** as in **Step 2** (**before** **`EndShift()`**).
 
-**Approach B — explicit registration**
+**Drop-in:** Use the **`LogRegisteredManualTasks()`** + **`FindTasksInScene()`** block from **Step 2** (already wired in repo **`StationManager`**). To disable logging, remove the **`LogRegisteredManualTasks();`** call from **`StartShift()`**.
 
-- `TaskBehavior` registers in `OnEnable`, unregisters in `OnDisable` into a list on `StationManager` or a small `TaskTracker` component.
+**Approach B — explicit registration** (optional alternative)
+
+```csharp
+// On TaskBehavior:
+void OnEnable()
+{
+    // StationManager.Instance?.RegisterManualTask(this);
+}
+void OnDisable()
+{
+    // StationManager.Instance?.UnregisterManualTask(this);
+}
+```
 
 **Verify**
 
-- Console shows count and names when a shift starts.
+- Console: **`[StationManager] Registered manual tasks: N — ...`** when a shift starts.
 
 ---
 
 ## Step 6 — UI split: Shift terminal vs performance review (doc layout)
 
-**Goal:** Separate **Accept Shift** flow from **post-shift review** into dedicated canvases/scripts as in `SETUP_GUIDE.md`, without breaking your current `StationManager` wiring.
+**Goal:** Thin UI script for **Accept Shift**; keep **`ShiftEvaluationUI`** for the report.
 
-**Files to add (suggested classes)**
+**Where to put it**
 
-- `ShiftTerminalUI.cs` — references Accept button, shift number text; calls `StationManager.StartShift()` (or a thin wrapper you add on `StationManager` like `public void OnAcceptShiftClicked()`).
-- Keep `ShiftEvaluationUI.cs` as the review surface; ensure **Continue** still calls `StationManager.ContinueToNextShift()`.
+| Item | Placement |
+|------|-----------|
+| **`ShiftTerminalUI.cs`** | **New file** under **`Assets/_Scripts/`** (or **`Assets/_Scripts/UI/`** if you add that folder). Not inside **`Editor/`**. |
+| Component on scene | Add **`ShiftTerminalUI`** to a **Canvas** or station terminal object. Wire **Accept** button → **`OnAcceptShiftClicked`** (or wire button **`OnClick`** to **`StationManager.StartShift`** directly). |
+| **`OnAcceptShiftClicked` on `StationManager`** | **Optional.** Add **`public void OnAcceptShiftClicked() => StartShift();`** **after** **`StartShift()`** or **before** **`EndShift()`** in **`StationManager.cs`**, with other public shift API. |
+| Stop double-firing | If **`startBtnUI`** already calls **`StartShift`**, either **remove** that hook and use **`ShiftTerminalUI`** only, or **do not** also bind the same button in **`ShiftTerminalUI`**. |
 
-**Files to touch**
+**Drop-in — new file `Assets/_Scripts/ShiftTerminalUI.cs`**
 
-- `Assets/_Scripts/StationManager.cs` — reduce direct responsibility for overlapping UI; expose small public methods events can call.
+```csharp
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
 
-**Drop-in pattern**
+public class ShiftTerminalUI : MonoBehaviour
+{
+    [SerializeField] private Button acceptShiftButton;
+    [SerializeField] private TextMeshProUGUI shiftLabel;
 
-- UI scripts hold **no** economy logic; they only forward to `StationManager` / `ShiftEvaluationUI`.
+    void Start()
+    {
+        if (acceptShiftButton != null)
+            acceptShiftButton.onClick.AddListener(OnAcceptShiftClicked);
+    }
+
+    void OnDestroy()
+    {
+        if (acceptShiftButton != null)
+            acceptShiftButton.onClick.RemoveListener(OnAcceptShiftClicked);
+    }
+
+    public void OnAcceptShiftClicked()
+    {
+        if (StationManager.Instance != null)
+            StationManager.Instance.StartShift();
+    }
+
+    public void SetShiftLabel(string text)
+    {
+        if (shiftLabel != null)
+            shiftLabel.text = text;
+    }
+}
+```
+
+**Drop-in — `StationManager`**: add **`public void OnAcceptShiftClicked() => StartShift();`** if you prefer button **`OnClick`** to call a named handler without **`ShiftTerminalUI`**.
 
 **Verify**
 
-- Full loop: accept → play → evaluation → continue → accept again, with no missing references.
+- Accept → play → evaluation → Continue → Accept again.
+
+---
+
+## Step 6.5 — Parity catch-up (resources, task log, `CleaningTask`, typewriter)
+
+**Why this step exists**
+
+Use this section to **patch older clones** (zip / stale branch) in one pass. On the **reference janitor prototype**, **§6.5 A–C are already in the codebase**; treat the subsections below as **verify / copy** instructions. **§6.5 D** and **Step 7** remain **optional polish** (typewriter not implemented in reference `ShiftEvaluationUI`).
+
+**Typical gaps (forks & minimal clones only)**
+
+| Area | Often missing if you are not on the reference tree |
+|------|------------------------------------------------------|
+| **Step 1** | **`GeneralConsumption`** only changes **`Storage`**; **no** **`RecordResourcesConsumed`** during shifts. |
+| **Step 5** | **No** **`LogRegisteredManualTasks()`** in **`StartShift`**. |
+| **Optional** | **`CleaningTask.cs`** absent — add from **§6.5 C**. |
+| **Step 7** | **No** typewriter on evaluation report text. |
+
+**Reference tree short version:** **1**, **5**, and **`CleaningTask`** are **done** in code; **6** may still need scene cleanup (two Accept paths); **7** and **8** are the next **code** steps if you want parity with old design docs.
+
+---
+
+### 6.5 A — Wire passive drain to `ShiftMetrics` (closes **Step 1**)
+
+**Status (reference tree):** **Implemented** — see `Breath` / `UsePower` / `RecordShiftResourcesIfActive` in `GeneralConsumption.cs`.
+
+**Where to put it** — `Assets/_Scripts/GeneralConsumption.cs`
+
+- Add **`RecordShiftResourcesIfActive`** (private helper) **after** **`UsePower()`** and **before** **`LightsOn()`** (or after **`LightsOff`**).
+- Replace the bodies of **`Breath()`** and **`UsePower()`** so each computes the **same** delta it subtracts, then calls the helper.
+
+**Drop-in**
+
+```csharp
+public void Breath()
+{
+    float oxygenThisFrame = Time.deltaTime * breatheDrain;
+    StationManager.Instance.OxygenStorage.amount -= oxygenThisFrame;
+    RecordShiftResourcesIfActive(0f, oxygenThisFrame);
+}
+
+public void UsePower()
+{
+    float powerThisFrame = Time.deltaTime * powerDrain * lights.Length;
+    StationManager.Instance.PowerStorage.amount -= powerThisFrame;
+    RecordShiftResourcesIfActive(powerThisFrame, 0f);
+}
+
+void RecordShiftResourcesIfActive(float powerConsumed, float oxygenConsumed)
+{
+    StationManager sm = StationManager.Instance;
+    if (sm != null && sm.ShiftInProgress)
+        sm.CurrentShift.RecordResourcesConsumed(powerConsumed, oxygenConsumed);
+}
+```
+
+**Verify** — During an active shift, **`resourcesConsumed`** (or **`GetSummary()`**) increases over time while passive O₂/power drain runs.
+
+---
+
+### 6.5 B — Shift-start task registry log (closes **Step 5**)
+
+**Status (reference tree):** **Implemented** — `StartShift` calls `LogRegisteredManualTasks()` after `ResetAllTaskBehaviorsForNewShift()`; helpers live next to `FindTasksInScene` in `StationManager.cs`.
+
+**Where to put it** — `Assets/_Scripts/StationManager.cs`
+
+- If **`LogRegisteredManualTasks`** is **missing**, copy **`LogRegisteredManualTasks`** + **`FindTasksInScene`** from **Step 2** (same file, **after** **`ResetAllTaskBehaviorsForNewShift`**).
+- Inside **`StartShift()`**, **after** **`ResetAllTaskBehaviorsForNewShift();`**, add **`LogRegisteredManualTasks();`** (remove the call if you want a silent console).
+
+**Verify** — Console: **`[StationManager] Registered manual tasks: N — ...`** each time you accept a shift.
+
+---
+
+### 6.5 C — Optional example: `CleaningTask` subclass
+
+**Status (reference tree):** **Implemented** — `Assets/_Scripts/Tasks/CleaningTask.cs` subclasses `TaskBehavior` with hook overrides (extend with VFX/UI).
+
+**Where to put it** — new file **`Assets/_Scripts/Tasks/CleaningTask.cs`** (skip if the file already exists).
+
+**Drop-in** — minimal subclass; extend with particles, audio, world-space UI:
+
+```csharp
+using UnityEngine;
+
+public class CleaningTask : TaskBehavior
+{
+    protected override void OnProgressChanged(float normalizedProgress)
+    {
+        // Example: drive a material blend, animator float, or TMP fill — keep cheap in Update-driven paths.
+    }
+
+    protected override void OnTaskPerfected()
+    {
+        base.OnTaskPerfected(); // optional if you add a base implementation later
+        Debug.Log($"[CleaningTask] Perfected: {name}");
+    }
+}
+```
+
+Add **`CleaningTask`** to a GameObject that already has a trigger collider (or swap **`TaskBehavior`** for **`CleaningTask`** on the same object).
+
+---
+
+### 6.5 D — Typewriter evaluation text → see **Step 7**
+
+**Status (reference tree):** **Not implemented** — evaluation report still appears in full when **`ShowEvaluation`** runs; implement **Step 7** when you want staggered reveal.
+
+**When ready:** Implement **Step 7** below (`TypewriteReport`, **`WaitForSecondsRealtime`**, stop coroutine in **`HideEvaluation`**).
+
+**Verify** — Same as **Step 7**.
 
 ---
 
 ## Step 7 — Performance review: typewriter effect (polish)
 
-**Goal:** Match the old doc feel: report text reveals gradually.
+**Status (reference tree):** **Not implemented** — `ShiftEvaluationUI.ShowEvaluation` assigns `reportText.text = evaluation.message` directly.
 
-**Files to touch**
+**Goal:** Report text reveals over time while **`Time.timeScale == 0`**.
 
-- `Assets/_Scripts/ShiftEvaluationUI.cs`
+**Where to put it** (`Assets/_Scripts/ShiftEvaluationUI.cs`)
 
-**Drop-in behavior**
+| Snippet | Placement |
+|--------|-----------|
+| **`typewriterCharsPerSecond`** + **`typewriterRoutine`** | **After** existing **`[SerializeField]`** UI refs (e.g. **`buttonText`**). **Before** **`void Start()`**. |
+| **`ShowEvaluation`** change | **Inside** **`ShowEvaluation`**, replace the block that sets **`reportText.text = evaluation.message;`** (keep classification + observations logic as-is). |
+| **`TypewriteReport`** coroutine | **After** **`ShowEvaluation`**, **before** **`GetClassificationColor`**. |
+| **`HideEvaluation`** | **First lines** inside **`HideEvaluation()`**, **before** **`isShowing = false;`** or **immediately after** it—**before** hiding the panel—so the coroutine stops cleanly. |
 
-- Coroutine or `TMP_Text` max visible characters over time.
-- Remember `Time.timeScale` is **0** while evaluation is shown — use **unscaled time** (`WaitForSecondsRealtime`) or manual delta from `Time.unscaledDeltaTime`.
+**Drop-in — `ShiftEvaluationUI` fields**
+
+```csharp
+[SerializeField] private float typewriterCharsPerSecond = 48f;
+private Coroutine typewriterRoutine;
+```
+
+**Drop-in — replace direct `reportText.text = evaluation.message`** in **`ShowEvaluation`** with:
+
+```csharp
+if (reportText != null)
+{
+    if (typewriterRoutine != null)
+        StopCoroutine(typewriterRoutine);
+    typewriterRoutine = StartCoroutine(TypewriteReport(evaluation.message));
+}
+```
+
+**Drop-in — methods**
+
+```csharp
+System.Collections.IEnumerator TypewriteReport(string fullText)
+{
+    reportText.text = "";
+    float delay = 1f / Mathf.Max(0.01f, typewriterCharsPerSecond);
+    int n = fullText.Length;
+    for (int i = 0; i <= n; i++)
+    {
+        reportText.text = fullText.Substring(0, i);
+        yield return new WaitForSecondsRealtime(delay);
+    }
+    typewriterRoutine = null;
+}
+```
+
+**Drop-in — `HideEvaluation()`** start:
+
+```csharp
+if (typewriterRoutine != null)
+{
+    StopCoroutine(typewriterRoutine);
+    typewriterRoutine = null;
+}
+```
 
 **Verify**
 
-- Text animates while game is paused; Continue still works.
+- Text animates while paused; **Continue** still works.
 
 ---
 
 ## Step 8 — Shift duration consistency (5 vs 10 minutes)
 
-**Goal:** Docs often use **300s**; `StationManager` default is **600s**. Pick one for the slice and align inspector + `AIManager` time expectations if you hard-coded expected duration.
+**Status (reference tree):** **Partial** — `StationManager.ShiftDurationSeconds => shiftDuration` exists; **`AIManager.CalculateTimeScore`** still uses a **literal `float expectedDuration = 600f`**. Wire **`stationManager`** (or query singleton) and replace that line per **Drop-in** below so Inspector shift length matches scoring.
 
-**Files to touch**
+**Goal:** **`AIManager.CalculateTimeScore`** uses the same expected length as **`StationManager.shiftDuration`**.
 
-- `Assets/_Scripts/StationManager.cs` — `shiftDuration` default or serialized value.
-- `Assets/_Scripts/AIManager.cs` — `CalculateTimeScore` uses `expectedDuration`; keep it in sync with real shift length or read it from a shared `ScriptableObject` / `StationManager` reference.
+**Where to put it**
+
+| Snippet | File | Placement |
+|--------|------|-----------|
+| **`ShiftDurationSeconds`** | `StationManager.cs` | **After** other shift public properties (e.g. `CurrentShift`, `AIManager`). |
+| **`stationManager`** field | `AIManager.cs` | **After** **`[Header("Evaluation Weights")]`** fields (or **Progression** header). Assign the scene’s **`StationManager`** in the Inspector. |
+| **`expectedDuration` line** | `AIManager.cs` | **Inside** **`CalculateTimeScore`**, **replace** the literal **`float expectedDuration = 600f;`** (or whatever is hard-coded today). |
+
+**Drop-in — `AIManager`**: add optional reference (assign in Inspector):
+
+```csharp
+[SerializeField] private StationManager stationManager;
+```
+
+**Drop-in — replace hard-coded `expectedDuration` in `CalculateTimeScore`**
+
+```csharp
+float expectedDuration = stationManager != null ? stationManager.ShiftDurationSeconds : 600f;
+```
+
+**Drop-in — `StationManager`**: expose read-only duration (add property next to **`shiftDuration`** field):
+
+```csharp
+public float ShiftDurationSeconds => shiftDuration;
+```
+
+Set **`shiftDuration`** in the Inspector to **300** or **600** to match docs; both sides now follow that value.
 
 **Verify**
 
-- End shift naturally: time score is not trivially broken by a mismatch.
+- Natural shift end: time score is not broken by a mismatch.
 
 ---
 
 ## Step 9 — Optional portfolio “pluggable actor” hook (future agents)
 
-**Goal:** One interface so **player input** and **future NPC/agent** can drive the same task progression (`PORTFOLIO_CONTEXT.md`).
+**Goal:** **`TaskBehavior`** asks an **`ITaskActor`** for “interacting” and “progress this frame” instead of **`Input`** only.
 
-**Files to add**
+**Where to put it**
 
-- `ITaskActor.cs` — e.g. `bool IsInteracting { get; }`, `float GetProgressContributionThisFrame(TaskBehavior task);`
+| Item | Placement |
+|------|-----------|
+| **`ITaskActor.cs`** | **New file** next to **`TaskBehavior.cs`** under **`Assets/_Scripts/Tasks/`**. |
+| **`PlayerTaskActor.cs`** | Same folder. Add component to **`Player`** root (or child). |
+| **`TaskBehavior`** fields | **After** existing **`[Header("Interaction")]`** fields. **`Awake`**: merge with existing collider check—resolve **`taskActor`** **after** **`col = GetComponent...`**. **`Update`**: replace only the **`cancelHeld`** / **`interactHeld`** lines; keep **`TryRecordAttempt`** through **`OnProgressChanged`** unchanged. |
 
-**Files to touch**
+**Drop-in — new file `Assets/_Scripts/Tasks/ITaskActor.cs`**
 
-- `Assets/_Scripts/Tasks/TaskBehavior.cs` — replace direct `Input.GetKey` checks with actor queries (player implementation first).
+```csharp
+public interface ITaskActor
+{
+    bool WantsInteractHold(TaskBehavior task);
+    bool WantsCancelHold(TaskBehavior task);
+}
+```
+
+**Drop-in — new file `Assets/_Scripts/Tasks/PlayerTaskActor.cs`**
+
+```csharp
+using UnityEngine;
+
+public class PlayerTaskActor : MonoBehaviour, ITaskActor
+{
+    [SerializeField] private KeyCode interactKey = KeyCode.E;
+    [SerializeField] private KeyCode cancelKey = KeyCode.Space;
+
+    public bool WantsInteractHold(TaskBehavior task) => Input.GetKey(interactKey);
+    public bool WantsCancelHold(TaskBehavior task) => Input.GetKey(cancelKey);
+}
+```
+
+**Drop-in — `TaskBehavior` changes (sketch)**
+
+```csharp
+[SerializeField] private MonoBehaviour taskActorBehaviour;
+private ITaskActor taskActor;
+
+protected virtual void Awake()
+{
+    // ... existing collider check ...
+    if (taskActorBehaviour is ITaskActor ia)
+        taskActor = ia;
+}
+
+protected virtual void Update()
+{
+    // ...
+    bool cancelHeld = useSoftCancel && (taskActor != null ? taskActor.WantsCancelHold(this) : Input.GetKey(cancelKey));
+    bool interactHeld = taskActor != null ? taskActor.WantsInteractHold(this) : Input.GetKey(interactKey);
+    // ... rest unchanged ...
+}
+```
+
+Add **`PlayerTaskActor`** on the **Player** and assign it on each **`TaskBehavior`** (or resolve via **`FindAnyObjectByType`** once in **`Start`** if you accept that cost).
 
 **Verify**
 
-- Same `CleaningTask` works with a `PlayerTaskActor` component; later you can add `BotTaskActor` without duplicating threshold logic.
+- Same task works with **`PlayerTaskActor`**; later add **`BotTaskActor : MonoBehaviour, ITaskActor`** for automation.
 
 ---
 
 ## Step 10 — In-repo README (not code, but completes the story)
 
 **Goal:** One-sentence pitch, Unity version, how to play, credits (Asaf + you), link to this guide and `PORTFOLIO_CONTEXT.md`.
+
+**Where to put it**
+
+- **`README.md`** at the **repository root** (same folder as **`Assets/`**, **`Packages/`**, **`ProjectSettings/`**), **not** inside **`Assets/`**.
 
 **File to add**
 
@@ -280,15 +812,18 @@ StationManager.Instance.CurrentShift.RecordResourcesConsumed(powerDeltaThisFrame
 | Step | Topic                         | Done |
 |------|-------------------------------|------|
 | 1    | Resource drain → metrics      | [ ]  |
-| 2    | Task cancel / SPACE           | [ ]  |
-| 3    | Manual task abandonment       | [ ]  |
+| 2    | `TaskBehavior` + scene wiring | [ ]  |
+| 3    | `ShiftMetrics` manual abandon | [ ]  |
 | 4    | Idle tracking                 | [ ]  |
 | 5    | Task registry log             | [ ]  |
 | 6    | Shift terminal UI split       | [ ]  |
+| 6.5  | Parity catch-up (§6.5 A–D)   | [ ]  |
 | 7    | Typewriter review             | [ ]  |
 | 8    | Shift duration vs AI time     | [ ]  |
 | 9    | `ITaskActor` (optional)       | [ ]  |
 | 10   | Root README                   | [ ]  |
+
+**Suggested marks for the reference janitor tree (adjust for your branch):** 1–5 **done**; 6 **partial** (code yes, scene may duplicate Accept); 6.5 **A–C done**, **D** open; 7–9 **open**; 10 optional.
 
 ---
 

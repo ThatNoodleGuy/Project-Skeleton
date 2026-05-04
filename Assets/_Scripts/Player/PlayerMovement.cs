@@ -147,6 +147,14 @@ public class PlayerMovement : MonoBehaviour
                 Mathf.Sqrt(jumpHeight * 2f * Mathf.Abs(Physics.gravity.y)), 
                 rb.linearVelocity.z);
         }
+
+        if (Mathf.Abs(horizontal) > 0.01f || Mathf.Abs(vertical) > 0.01f)
+        {
+            if (StationManager.Instance != null && StationManager.Instance.ShiftInProgress)
+            {
+                StationManager.Instance.CurrentShift.NotifyPlayerActivity();
+            }
+        }
     }
 
     /// <summary>

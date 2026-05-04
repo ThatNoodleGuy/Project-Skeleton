@@ -107,6 +107,8 @@ public class StationManager : Singleton<StationManager>
     public bool ShiftInProgress => shiftInProgress;
     public ShiftMetrics CurrentShift => currentShift;
     public AIManager AIManager => aiManager;
+    /// <summary>Configured shift length in seconds (Inspector <c>shiftDuration</c>).</summary>
+    public float ShiftDurationSeconds => shiftDuration;
 
     void Start()
     {
@@ -203,6 +205,11 @@ public class StationManager : Singleton<StationManager>
         {
             UpdateShiftTimer();
         }
+
+        if (currentShift != null)
+        {            
+            currentShift.AccumulateIdleTime(Time.deltaTime);
+        }
     }
     
     // ===== SHIFT SYSTEM METHODS =====
@@ -223,6 +230,9 @@ public class StationManager : Singleton<StationManager>
         currentShift.StartShift();
         shiftInProgress = true;
         shiftTimer = 0f;
+
+        ResetAllTaskBehaviorsForNewShift();
+        LogRegisteredManualTasks(); // optional
         
         // UI updates
         if (startBtnUI != null)
@@ -247,6 +257,42 @@ public class StationManager : Singleton<StationManager>
             endShiftButton.gameObject.SetActive(true);
         
         Debug.Log("[StationManager] === SHIFT STARTED ===");
+    }
+
+    void ResetAllTaskBehaviorsForNewShift()
+    {
+        TaskBehavior[] tasks = FindTasksInScene();
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            if (tasks[i] != null)
+                tasks[i].ResetForNewShift();
+        }
+    }
+
+    void LogRegisteredManualTasks()
+    {
+        TaskBehavior[] tasks = FindTasksInScene();
+        if (tasks.Length == 0)
+        {
+            Debug.Log("[StationManager] Registered manual tasks: 0");
+            return;
+        }
+        var names = new System.Collections.Generic.List<string>(tasks.Length);
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            if (tasks[i] != null)
+                names.Add(tasks[i].gameObject.name);
+        }
+        Debug.Log($"[StationManager] Registered manual tasks: {names.Count} — {string.Join(", ", names)}");
+    }
+
+    static TaskBehavior[] FindTasksInScene()
+    {
+    #if UNITY_6000_0_OR_NEWER
+        return FindObjectsByType<TaskBehavior>(FindObjectsSortMode.None);
+    #else
+        return FindObjectsOfType<TaskBehavior>();
+    #endif
     }
     
     /// <summary>
@@ -653,4 +699,6 @@ public class StationManager : Singleton<StationManager>
             points -= mask.upgradeCost;
         }
     }
+
+    public void OnAcceptShiftClicked() => StartShift();
 }
