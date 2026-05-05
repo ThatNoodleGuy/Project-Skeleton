@@ -20,25 +20,28 @@ public class CamerasManager : MonoBehaviour
     private void Start()
     {
         stationManager = StationManager.Instance;
-        goToPCScreenText = GameObject.Find("goToPCScreenText");
+        if (goToPCScreenText == null)
+            goToPCScreenText = FindByNameIncludingInactive("goToPCScreenText");
         SetPlayerCamera();
     }
 
     private void Update()
     {
-        if (NearerstPos() != null)
+        Transform nearest = NearerstPos();
+        if (nearest != null)
         {
-            goToPCScreenText.SetActive(true);
+            SetPromptVisible(true);
             if (Input.GetKeyDown(KeyCode.E))
             {
-                goToPCScreenText.SetActive(false);
-                playerAudioSource.PlayOneShot(pcOn);
+                SetPromptVisible(false);
+                if (playerAudioSource != null && pcOn != null)
+                    playerAudioSource.PlayOneShot(pcOn);
                 SetCamera();
             }
         }
         else
         {
-            goToPCScreenText.SetActive(false);
+            SetPromptVisible(false);
         }
 
         if (Input.GetKeyDown(KeyCode.Escape))
@@ -49,18 +52,22 @@ public class CamerasManager : MonoBehaviour
 
     public void SetPlayerCamera()
     {
-        if (!playerCamera.gameObject.activeInHierarchy)
+        if (playerCamera != null && !playerCamera.gameObject.activeInHierarchy && playerAudioSource != null && pcOff != null)
             playerAudioSource.PlayOneShot(pcOff);
 
-        goToPCScreenText.SetActive(false);
-        screenCamera.gameObject.SetActive(false);
-        playerCamera.gameObject.SetActive(true);
+        SetPromptVisible(false);
+        if (screenCamera != null) screenCamera.gameObject.SetActive(false);
+        if (playerCamera != null) playerCamera.gameObject.SetActive(true);
 
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
 
-        player.GetComponent<PlayerMovement>().enabled = true;
-        playerUI.SetActive(true);
+        if (player != null)
+        {
+            var pm = player.GetComponent<PlayerMovement>();
+            if (pm != null) pm.enabled = true;
+        }
+        if (playerUI != null) playerUI.SetActive(true);
         // stationManager.isHomeScreen = true;
     }
 
@@ -71,6 +78,7 @@ public class CamerasManager : MonoBehaviour
 
         foreach (var item in camPos)
         {
+            if (item == null || player == null) continue;
             float distance = Vector3.Distance(item.transform.position, player.position);
 
             if (distance < checkDistance)
@@ -86,20 +94,46 @@ public class CamerasManager : MonoBehaviour
 
     public void SetCamera()
     {
-        playerCamera.gameObject.SetActive(false);
-        screenCamera.gameObject.SetActive(true);
+        if (playerCamera != null) playerCamera.gameObject.SetActive(false);
+        if (screenCamera != null) screenCamera.gameObject.SetActive(true);
 
-        if (NearerstPos() != null)
+        Transform nearest = NearerstPos();
+        if (nearest != null && screenCamera != null)
         {
-            screenCamera.transform.position = NearerstPos().position;
-            screenCamera.transform.rotation = NearerstPos().rotation;
+            screenCamera.transform.position = nearest.position;
+            screenCamera.transform.rotation = nearest.rotation;
 
         }
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
 
-        player.GetComponent<PlayerMovement>().enabled = false;//.gameObject.SetActive(false);
-        playerUI.SetActive(false);
+        if (player != null)
+        {
+            var pm = player.GetComponent<PlayerMovement>();
+            if (pm != null) pm.enabled = false;
+        }
+        if (playerUI != null) playerUI.SetActive(false);
+    }
+
+    private void SetPromptVisible(bool visible)
+    {
+        if (goToPCScreenText != null)
+            goToPCScreenText.SetActive(visible);
+    }
+
+    private static GameObject FindByNameIncludingInactive(string objectName)
+    {
+        var all = Resources.FindObjectsOfTypeAll<GameObject>();
+        for (int i = 0; i < all.Length; i++)
+        {
+            var go = all[i];
+            if (go == null) continue;
+            if (go.hideFlags != HideFlags.None) continue;
+            if (!go.scene.IsValid()) continue;
+            if (go.name == objectName)
+                return go;
+        }
+        return null;
     }
 
 }

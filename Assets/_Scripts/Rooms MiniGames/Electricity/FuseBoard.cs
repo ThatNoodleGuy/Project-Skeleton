@@ -35,16 +35,19 @@ public class FuseBoard : MonoBehaviour
 
     void Update()
     {
+        if (powerRoomController == null)
+            return;
+
         // Show puzzle when room needs resources
-        if (powerRoomController != null && !powerRoomController.HasRecource() && !puzzleActive)
+        if (!powerRoomController.HasRecource() && !puzzleActive)
         {
             GeneratePuzzle();
             puzzleActive = true;
             puzzleSolved = false;
         }
         
-        // Clear puzzle when player leaves
-        if (powerRoomController != null && powerRoomController.isGoingOut && puzzleActive)
+        // Keep puzzle available while room needs resources; clear only when room is restored.
+        if (powerRoomController.HasRecource() && puzzleActive)
         {
             ClearPuzzle();
             puzzleActive = false;

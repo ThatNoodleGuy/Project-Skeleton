@@ -59,7 +59,11 @@ public class PlayerOxygen : MonoBehaviour
         currentOxygen = Mathf.Clamp(currentOxygen, 0, oxygenAmount);
 
         // Handle oxygen depletion/regeneration based on station oxygen
-        if (StationManager.Instance.OxygenStorage.amount < 0.001f)
+        StationManager sm = StationManager.Instance;
+        if (sm == null || sm.OxygenStorage == null)
+            return;
+
+        if (sm.OxygenStorage.amount < 0.001f)
         {
             // No oxygen in station - deplete player oxygen
             currentOxygen -= decreaseOxygenBy * Time.deltaTime;

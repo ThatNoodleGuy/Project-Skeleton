@@ -54,15 +54,18 @@ public class OxygenPuzzle : MonoBehaviour
 
     void Update()
     {
+        if (oxygenRoomController == null)
+            return;
+
         // Show puzzle when room needs resources
-        if (oxygenRoomController != null && !oxygenRoomController.HasRecource() && !puzzleActive)
+        if (!oxygenRoomController.HasRecource() && !puzzleActive)
         {
             GeneratePuzzle();
             puzzleActive = true;
         }
         
-        // Clear puzzle when player leaves
-        if (oxygenRoomController != null && oxygenRoomController.isGoingOut && puzzleActive)
+        // Keep puzzle available while room needs resources; clear only when room is restored.
+        if (oxygenRoomController.HasRecource() && puzzleActive)
         {
             ClearPuzzle();
             puzzleActive = false;
