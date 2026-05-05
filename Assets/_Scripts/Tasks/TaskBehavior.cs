@@ -9,29 +9,27 @@ using UnityEngine;
 public class TaskBehavior : MonoBehaviour
 {
     [Header("Identity (ShiftMetrics)")]
-    [Tooltip("Stable id for this instance for the whole shift. If empty, name + instance ID is used.")]
     [SerializeField] private string uniqueTaskId;
 
     [Header("Interaction")]
     [SerializeField] private KeyCode interactKey = KeyCode.E;
-    [Tooltip("Progress per second while interact key is held in range.")]
     [SerializeField] private float progressPerSecond = 0.35f;
-    [Tooltip("Normalized progress (0-1) required for \"operational\" (~75% in design docs).")]
-    [Range(0f, 1f)]
-    [SerializeField] private float operationalThreshold = 0.75f;
-    [Tooltip("Doc parity: hold Space to pause progress (soft cancel). Leave interact key held.")]
+    [Range(0f, 1f)] [SerializeField] private float operationalThreshold = 0.75f;
     [SerializeField] private KeyCode cancelKey = KeyCode.Space;
     [SerializeField] private bool useSoftCancel = true;
+
+    [Header("Actor (optional)")]
+    [SerializeField] private MonoBehaviour taskActorBehaviour;
 
     [Header("State")]
     [SerializeField] [Range(0f, 1f)] private float progress;
     [SerializeField] private bool taskCompleted;
 
+    private ITaskActor taskActor;
     private Collider col;
     private bool isPlayerInRange;
-    private bool hasLoggedAttemptThisShift; // first hold-in-range this shift for metrics edge cases
+    private bool hasLoggedAttemptThisShift;
 
-    /// <summary>0–1 progress; read-only for UI elsewhere if needed.</summary>
     public float Progress => progress;
     public bool IsComplete => taskCompleted;
     public float OperationalThreshold => operationalThreshold;
@@ -41,18 +39,20 @@ public class TaskBehavior : MonoBehaviour
         col = GetComponent<Collider>();
         if (col != null && !col.isTrigger)
             Debug.LogWarning($"[TaskBehavior] {name}: collider should be IsTrigger for range detection.");
+
+        taskActor = taskActorBehaviour as ITaskActor;
     }
 
     protected virtual void Update()
     {
         if (taskCompleted)
             return;
-
         if (!isPlayerInRange || !CanReceiveInput())
             return;
 
-        bool cancelHeld = useSoftCancel && Input.GetKey(cancelKey);
-        bool interactHeld = Input.GetKey(interactKey);
+        bool interactHeld = taskActor != null ? taskActor.WantsInteractHold(this) : Input.GetKey(interactKey);
+        bool cancelHeld = useSoftCancel &&
+                          (taskActor != null ? taskActor.WantsCancelHold(this) : Input.GetKey(cancelKey));
 
         if (interactHeld && !cancelHeld)
         {
@@ -72,11 +72,7 @@ public class TaskBehavior : MonoBehaviour
         }
     }
 
-    /// <summary>Override if you need UI pause, cutscenes, etc.</summary>
-    protected virtual bool CanReceiveInput()
-    {
-        return true;
-    }
+    protected virtual bool CanReceiveInput() => true;
 
     private void TryRecordAttempt()
     {
@@ -84,7 +80,6 @@ public class TaskBehavior : MonoBehaviour
         if (sm == null || !sm.ShiftInProgress)
             return;
 
-        // ShiftMetrics counts distinct task ids; still call once per "session start" for clarity/logging.
         if (!hasLoggedAttemptThisShift)
         {
             sm.CurrentShift.RecordTaskAttempted(ResolveTaskId());
@@ -114,13 +109,8 @@ public class TaskBehavior : MonoBehaviour
         OnProgressChanged(1f);
     }
 
-    /// <summary>Progress updated but task not necessarily complete.</summary>
     protected virtual void OnProgressChanged(float normalizedProgress) { }
-
-    /// <summary>Crossed operational threshold this shift (once per id in ShiftMetrics).</summary>
     protected virtual void OnTaskOperational() { }
-
-    /// <summary>Reached 100%.</summary>
     protected virtual void OnTaskPerfected() { }
 
     private string ResolveTaskId()
@@ -142,7 +132,6 @@ public class TaskBehavior : MonoBehaviour
         if (!other.CompareTag("Player"))
             return;
         isPlayerInRange = false;
-        // Optional: abandon mid-bar — reset local progress so they must redo work next visit.
         if (!taskCompleted)
         {
             progress = 0f;
@@ -150,9 +139,6 @@ public class TaskBehavior : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Call when a new shift starts (e.g. from <see cref="StationManager.StartShift"/>) so tasks can be completed again.
-    /// </summary>
     public virtual void ResetForNewShift()
     {
         progress = 0f;

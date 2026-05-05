@@ -508,6 +508,32 @@ public class ShiftTerminalUI : MonoBehaviour
 
 - Accept → play → evaluation → Continue → Accept again.
 
+### Scene YAML map (exact objects in `Assets/Scenes/PrototypeScene 1.unity`)
+
+Use this when wiring in the Editor so you do not guess object names:
+
+| Object in scene YAML | What it already has | What to add / change now |
+|------|----------------------|--------------------------|
+| `MainRoom` | `StationManager` + `GeneralConsumption` (same GameObject) | Nothing for Step 6. Ensure this object stays active because it owns shift flow and passive drain recording. |
+| `Player` | Player tag and movement stack | Keep tag `Player` (required by `TaskBehavior`/`CleaningTask` triggers). |
+| `PlayerUI` | Root UI canvas hierarchy | Keep as HUD root; no mandatory new script here. |
+| `ShiftEvaluationPanel (Panel)` | `ShiftEvaluationUI` component is already attached and referenced by `StationManager.evaluationUI` | Step 7 work goes on this existing script/component; do not create a second evaluation panel. |
+| `HomePanel` | Home screen panel containing `StartBtn` | Recommended host for `ShiftTerminalUI` if you use it. |
+| `StartBtn` | Already wired as `StationManager.startBtnUI` and calls `StationManager.StartShift` via Button `OnClick` | If you add `ShiftTerminalUI`, either: (A) keep current `OnClick` and do not bind again from `ShiftTerminalUI`, or (B) move handling to `ShiftTerminalUI` and remove duplicate listener. |
+
+Not present in this scene YAML right now:
+
+- `ShiftTerminalUI` component (script exists in project, but not attached in `PrototypeScene 1` yet).
+- Any `TaskBehavior` or `CleaningTask` component instance.
+
+Exact add recommendation for manual task testing (first instance):
+
+1. Under `MainRoom`, create `CleaningTask_01` (3D object or empty + mesh child).
+2. Add a `BoxCollider` on `CleaningTask_01`, set `Is Trigger = true`.
+3. Add `CleaningTask` component.
+4. Tune `TaskBehavior` fields on that component (`progressPerSecond`, `operationalThreshold`, optional `uniqueTaskId`).
+5. Play and verify metrics update on shift end.
+
 ---
 
 ## Step 6.5 — Parity catch-up (resources, task log, `CleaningTask`, typewriter)
@@ -538,9 +564,70 @@ Use this section to **patch older clones** (zip / stale branch) in one pass. On 
 - Add **`RecordShiftResourcesIfActive`** (private helper) **after** **`UsePower()`** and **before** **`LightsOn()`** (or after **`LightsOff`**).
 - Replace the bodies of **`Breath()`** and **`UsePower()`** so each computes the **same** delta it subtracts, then calls the helper.
 
-**Drop-in**
+**Drop-in (complete `GeneralConsumption.cs` reference version)**
 
 ```csharp
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class GeneralConsumption : MonoBehaviour
+{
+    [SerializeField] private bool usePassiveO2;
+    [SerializeField] private bool usePassivePower;
+    [SerializeField] private GameObject[] lights;
+    StationManager stationManager;
+    [SerializeField] private float breatheDrain;
+    [SerializeField] private float powerDrain;
+
+    private float valueToDrainFast = 100f;
+    private float valueToStop = 0;
+    private float valueToDrainSlow = 0.05f;
+
+    private void Start()
+    {
+        lights = GameObject.FindGameObjectsWithTag("RoomLight");
+        stationManager = StationManager.Instance;
+    }
+
+    private void Update()
+    {
+        if (usePassiveO2)
+        {
+            Breath();
+        }
+
+        if (usePassivePower)
+        {
+            UsePower();
+        }
+
+        if (StationManager.Instance.PowerStorage.amount <= 0)
+        {
+            LightsOff();
+        }
+        else
+        {
+            LightsOn();
+        }
+
+        if (Input.GetKey(KeyCode.Q))
+        {
+            breatheDrain = valueToDrainFast;
+            powerDrain = valueToDrainFast;
+        }
+        else if (Input.GetKey(KeyCode.Z))
+        {
+            breatheDrain = valueToStop;
+            powerDrain = valueToStop;
+        }
+        else
+        {
+            breatheDrain = valueToDrainSlow;
+            powerDrain = valueToDrainSlow;
+        }
+    }
+
 public void Breath()
 {
     float oxygenThisFrame = Time.deltaTime * breatheDrain;
@@ -560,6 +647,23 @@ void RecordShiftResourcesIfActive(float powerConsumed, float oxygenConsumed)
     StationManager sm = StationManager.Instance;
     if (sm != null && sm.ShiftInProgress)
         sm.CurrentShift.RecordResourcesConsumed(powerConsumed, oxygenConsumed);
+}
+
+    public void LightsOn()
+    {
+        foreach (var item in lights)
+        {
+            item.SetActive(true);
+        }
+    }
+
+    public void LightsOff()
+    {
+        foreach (var item in lights)
+        {
+            item.SetActive(false);
+        }
+    }
 }
 ```
 
@@ -626,63 +730,106 @@ Add **`CleaningTask`** to a GameObject that already has a trigger collider (or s
 
 **Goal:** Report text reveals over time while **`Time.timeScale == 0`**.
 
-**Where to put it** (`Assets/_Scripts/ShiftEvaluationUI.cs`)
+**Drop-in (full methods version)** — `Assets/_Scripts/ShiftEvaluationUI.cs`
 
-| Snippet | Placement |
-|--------|-----------|
-| **`typewriterCharsPerSecond`** + **`typewriterRoutine`** | **After** existing **`[SerializeField]`** UI refs (e.g. **`buttonText`**). **Before** **`void Start()`**. |
-| **`ShowEvaluation`** change | **Inside** **`ShowEvaluation`**, replace the block that sets **`reportText.text = evaluation.message;`** (keep classification + observations logic as-is). |
-| **`TypewriteReport`** coroutine | **After** **`ShowEvaluation`**, **before** **`GetClassificationColor`**. |
-| **`HideEvaluation`** | **First lines** inside **`HideEvaluation()`**, **before** **`isShowing = false;`** or **immediately after** it—**before** hiding the panel—so the coroutine stops cleanly. |
-
-**Drop-in — `ShiftEvaluationUI` fields**
+Replace these methods + add helper fields exactly as shown.
 
 ```csharp
+// Add these fields with other UI settings fields.
 [SerializeField] private float typewriterCharsPerSecond = 48f;
 private Coroutine typewriterRoutine;
-```
 
-**Drop-in — replace direct `reportText.text = evaluation.message`** in **`ShowEvaluation`** with:
-
-```csharp
-if (reportText != null)
+public void ShowEvaluation(ShiftEvaluation evaluation)
 {
-    if (typewriterRoutine != null)
-        StopCoroutine(typewriterRoutine);
-    typewriterRoutine = StartCoroutine(TypewriteReport(evaluation.message));
+    if (evaluationPanel == null)
+    {
+        Debug.LogError("[ShiftEvaluationUI] Evaluation panel not assigned!");
+        return;
+    }
+
+    isShowing = true;
+
+    Cursor.visible = true;
+    Cursor.lockState = CursorLockMode.None;
+    Time.timeScale = 0f;
+
+    if (classificationText != null)
+    {
+        classificationText.text = evaluation.classification;
+        classificationText.color = GetClassificationColor(evaluation.overallScore);
+    }
+
+    // Typewriter report text (realtime because timescale is 0 during review)
+    if (reportText != null)
+    {
+        if (typewriterRoutine != null)
+            StopCoroutine(typewriterRoutine);
+
+        typewriterRoutine = StartCoroutine(TypewriteReport(evaluation.message));
+    }
+
+    if (observationsText != null)
+    {
+        if (evaluation.observations != null && evaluation.observations.Count > 0)
+        {
+            string obsText = "OBSERVATIONS:\n";
+            foreach (string obs in evaluation.observations)
+                obsText += $"• {obs}\n";
+            observationsText.text = obsText;
+        }
+        else
+        {
+            observationsText.text = "OBSERVATIONS:\nNone.";
+        }
+    }
+
+    evaluationPanel.SetActive(true);
+    Debug.Log($"[ShiftEvaluationUI] Showing evaluation: {evaluation.classification}");
 }
-```
 
-**Drop-in — methods**
-
-```csharp
-System.Collections.IEnumerator TypewriteReport(string fullText)
+private IEnumerator TypewriteReport(string fullText)
 {
+    if (reportText == null)
+        yield break;
+
     reportText.text = "";
     float delay = 1f / Mathf.Max(0.01f, typewriterCharsPerSecond);
-    int n = fullText.Length;
+
+    int n = fullText != null ? fullText.Length : 0;
     for (int i = 0; i <= n; i++)
     {
         reportText.text = fullText.Substring(0, i);
         yield return new WaitForSecondsRealtime(delay);
     }
+
     typewriterRoutine = null;
 }
-```
 
-**Drop-in — `HideEvaluation()`** start:
-
-```csharp
-if (typewriterRoutine != null)
+public void HideEvaluation()
 {
-    StopCoroutine(typewriterRoutine);
-    typewriterRoutine = null;
+    if (typewriterRoutine != null)
+    {
+        StopCoroutine(typewriterRoutine);
+        typewriterRoutine = null;
+    }
+
+    isShowing = false;
+
+    if (evaluationPanel != null)
+        evaluationPanel.SetActive(false);
+
+    Time.timeScale = 1f;
+    Cursor.visible = false;
+    Cursor.lockState = CursorLockMode.Locked;
+
+    Debug.Log("[ShiftEvaluationUI] Evaluation hidden");
 }
 ```
 
 **Verify**
 
 - Text animates while paused; **Continue** still works.
+- Reopening evaluation in same session does not stack coroutines.
 
 ---
 
@@ -692,37 +839,44 @@ if (typewriterRoutine != null)
 
 **Goal:** **`AIManager.CalculateTimeScore`** uses the same expected length as **`StationManager.shiftDuration`**.
 
-**Where to put it**
+**Drop-in (full methods version)**
 
-| Snippet | File | Placement |
-|--------|------|-----------|
-| **`ShiftDurationSeconds`** | `StationManager.cs` | **After** other shift public properties (e.g. `CurrentShift`, `AIManager`). |
-| **`stationManager`** field | `AIManager.cs` | **After** **`[Header("Evaluation Weights")]`** fields (or **Progression** header). Assign the scene’s **`StationManager`** in the Inspector. |
-| **`expectedDuration` line** | `AIManager.cs` | **Inside** **`CalculateTimeScore`**, **replace** the literal **`float expectedDuration = 600f;`** (or whatever is hard-coded today). |
-
-**Drop-in — `AIManager`**: add optional reference (assign in Inspector):
-
-```csharp
-[SerializeField] private StationManager stationManager;
-```
-
-**Drop-in — replace hard-coded `expectedDuration` in `CalculateTimeScore`**
-
-```csharp
-float expectedDuration = stationManager != null ? stationManager.ShiftDurationSeconds : 600f;
-```
-
-**Drop-in — `StationManager`**: expose read-only duration (add property next to **`shiftDuration`** field):
+`Assets/_Scripts/StationManager.cs` (property should exist; add if missing):
 
 ```csharp
 public float ShiftDurationSeconds => shiftDuration;
 ```
 
-Set **`shiftDuration`** in the Inspector to **300** or **600** to match docs; both sides now follow that value.
+`Assets/_Scripts/AIManager.cs`:
+
+```csharp
+// Add with other serialized fields (assign in Inspector if you do not auto-resolve).
+[SerializeField] private StationManager stationManager;
+
+void Start()
+{
+    InitializeThresholds();
+
+    if (stationManager == null)
+        stationManager = StationManager.Instance;
+}
+
+float CalculateTimeScore(ShiftMetrics metrics)
+{
+    float expectedDuration = stationManager != null ? stationManager.ShiftDurationSeconds : 600f;
+    float duration = metrics.GetShiftDuration();
+
+    float deviation = Mathf.Abs(duration - expectedDuration) / Mathf.Max(1f, expectedDuration);
+    return Mathf.Clamp01(1.0f - deviation);
+}
+```
+
+Set `StationManager.shiftDuration` in Inspector (300, 600, or your target).  
+This now makes AI time scoring follow the actual configured shift length.
 
 **Verify**
 
-- Natural shift end: time score is not broken by a mismatch.
+- Natural shift end: time score changes when `shiftDuration` changes.
 
 ---
 
@@ -730,15 +884,9 @@ Set **`shiftDuration`** in the Inspector to **300** or **600** to match docs; bo
 
 **Goal:** **`TaskBehavior`** asks an **`ITaskActor`** for “interacting” and “progress this frame” instead of **`Input`** only.
 
-**Where to put it**
+**Drop-in (full scripts + full methods)**
 
-| Item | Placement |
-|------|-----------|
-| **`ITaskActor.cs`** | **New file** next to **`TaskBehavior.cs`** under **`Assets/_Scripts/Tasks/`**. |
-| **`PlayerTaskActor.cs`** | Same folder. Add component to **`Player`** root (or child). |
-| **`TaskBehavior`** fields | **After** existing **`[Header("Interaction")]`** fields. **`Awake`**: merge with existing collider check—resolve **`taskActor`** **after** **`col = GetComponent...`**. **`Update`**: replace only the **`cancelHeld`** / **`interactHeld`** lines; keep **`TryRecordAttempt`** through **`OnProgressChanged`** unchanged. |
-
-**Drop-in — new file `Assets/_Scripts/Tasks/ITaskActor.cs`**
+`Assets/_Scripts/Tasks/ITaskActor.cs`
 
 ```csharp
 public interface ITaskActor
@@ -748,7 +896,7 @@ public interface ITaskActor
 }
 ```
 
-**Drop-in — new file `Assets/_Scripts/Tasks/PlayerTaskActor.cs`**
+`Assets/_Scripts/Tasks/PlayerTaskActor.cs`
 
 ```csharp
 using UnityEngine;
@@ -763,33 +911,217 @@ public class PlayerTaskActor : MonoBehaviour, ITaskActor
 }
 ```
 
-**Drop-in — `TaskBehavior` changes (sketch)**
+`Assets/_Scripts/Tasks/TaskBehavior.cs` (full script version with actor support):
 
 ```csharp
-[SerializeField] private MonoBehaviour taskActorBehaviour;
-private ITaskActor taskActor;
+using UnityEngine;
 
-protected virtual void Awake()
+[RequireComponent(typeof(Collider))]
+public class TaskBehavior : MonoBehaviour
 {
-    // ... existing collider check ...
-    if (taskActorBehaviour is ITaskActor ia)
-        taskActor = ia;
-}
+    [Header("Identity (ShiftMetrics)")]
+    [SerializeField] private string uniqueTaskId;
 
-protected virtual void Update()
-{
-    // ...
-    bool cancelHeld = useSoftCancel && (taskActor != null ? taskActor.WantsCancelHold(this) : Input.GetKey(cancelKey));
-    bool interactHeld = taskActor != null ? taskActor.WantsInteractHold(this) : Input.GetKey(interactKey);
-    // ... rest unchanged ...
+    [Header("Interaction")]
+    [SerializeField] private KeyCode interactKey = KeyCode.E;
+    [SerializeField] private float progressPerSecond = 0.35f;
+    [Range(0f, 1f)] [SerializeField] private float operationalThreshold = 0.75f;
+    [SerializeField] private KeyCode cancelKey = KeyCode.Space;
+    [SerializeField] private bool useSoftCancel = true;
+
+    [Header("Actor (optional)")]
+    [SerializeField] private MonoBehaviour taskActorBehaviour;
+
+    [Header("State")]
+    [SerializeField] [Range(0f, 1f)] private float progress;
+    [SerializeField] private bool taskCompleted;
+
+    private ITaskActor taskActor;
+    private Collider col;
+    private bool isPlayerInRange;
+    private bool hasLoggedAttemptThisShift;
+
+    public float Progress => progress;
+    public bool IsComplete => taskCompleted;
+    public float OperationalThreshold => operationalThreshold;
+
+    protected virtual void Awake()
+    {
+        col = GetComponent<Collider>();
+        if (col != null && !col.isTrigger)
+            Debug.LogWarning($"[TaskBehavior] {name}: collider should be IsTrigger for range detection.");
+
+        taskActor = taskActorBehaviour as ITaskActor;
+    }
+
+    protected virtual void Update()
+    {
+        if (taskCompleted)
+            return;
+        if (!isPlayerInRange || !CanReceiveInput())
+            return;
+
+        bool interactHeld = taskActor != null ? taskActor.WantsInteractHold(this) : Input.GetKey(interactKey);
+        bool cancelHeld = useSoftCancel &&
+                          (taskActor != null ? taskActor.WantsCancelHold(this) : Input.GetKey(cancelKey));
+
+        if (interactHeld && !cancelHeld)
+        {
+            TryRecordAttempt();
+
+            float delta = progressPerSecond * Time.deltaTime;
+            float previous = progress;
+            progress = Mathf.Clamp01(progress + delta);
+
+            if (previous < operationalThreshold && progress >= operationalThreshold)
+                OnReachedOperational();
+
+            if (progress >= 1f)
+                OnReachedPerfected();
+            else if (progress != previous)
+                OnProgressChanged(progress);
+        }
+    }
+
+    protected virtual bool CanReceiveInput() => true;
+
+    private void TryRecordAttempt()
+    {
+        StationManager sm = StationManager.Instance;
+        if (sm == null || !sm.ShiftInProgress)
+            return;
+
+        if (!hasLoggedAttemptThisShift)
+        {
+            sm.CurrentShift.RecordTaskAttempted(ResolveTaskId());
+            hasLoggedAttemptThisShift = true;
+        }
+    }
+
+    private void OnReachedOperational()
+    {
+        StationManager sm = StationManager.Instance;
+        if (sm != null && sm.ShiftInProgress)
+            sm.CurrentShift.RecordTaskOperational(ResolveTaskId());
+
+        OnTaskOperational();
+    }
+
+    private void OnReachedPerfected()
+    {
+        progress = 1f;
+        taskCompleted = true;
+
+        StationManager sm = StationManager.Instance;
+        if (sm != null && sm.ShiftInProgress)
+            sm.CurrentShift.RecordTaskPerfected(ResolveTaskId());
+
+        OnTaskPerfected();
+        OnProgressChanged(1f);
+    }
+
+    protected virtual void OnProgressChanged(float normalizedProgress) { }
+    protected virtual void OnTaskOperational() { }
+    protected virtual void OnTaskPerfected() { }
+
+    private string ResolveTaskId()
+    {
+        if (!string.IsNullOrEmpty(uniqueTaskId))
+            return uniqueTaskId;
+        return $"{gameObject.name}_{GetInstanceID()}";
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        if (!other.CompareTag("Player"))
+            return;
+        isPlayerInRange = true;
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        if (!other.CompareTag("Player"))
+            return;
+        isPlayerInRange = false;
+        if (!taskCompleted)
+        {
+            progress = 0f;
+            hasLoggedAttemptThisShift = false;
+        }
+    }
+
+    public virtual void ResetForNewShift()
+    {
+        progress = 0f;
+        taskCompleted = false;
+        hasLoggedAttemptThisShift = false;
+    }
+
+#if UNITY_EDITOR
+    protected virtual void OnValidate()
+    {
+        operationalThreshold = Mathf.Clamp01(operationalThreshold);
+        progress = Mathf.Clamp01(progress);
+    }
+#endif
 }
 ```
 
-Add **`PlayerTaskActor`** on the **Player** and assign it on each **`TaskBehavior`** (or resolve via **`FindAnyObjectByType`** once in **`Start`** if you accept that cost).
+**Optional task-feedback notification script (during task, not only at shift end)**  
+`Assets/_Scripts/Tasks/CleaningTask.cs`
+
+```csharp
+using UnityEngine;
+using TMPro;
+
+public class CleaningTask : TaskBehavior
+{
+    [Header("Optional UI feedback")]
+    [SerializeField] private TextMeshProUGUI taskHintText;
+    [SerializeField] private string startedText = "Cleaning started";
+    [SerializeField] private string operationalText = "Operational threshold reached";
+    [SerializeField] private string perfectedText = "Task perfected";
+
+    private bool announcedStart;
+
+    protected override void OnProgressChanged(float normalizedProgress)
+    {
+        if (!announcedStart && normalizedProgress > 0f)
+        {
+            announcedStart = true;
+            ShowHint(startedText);
+        }
+    }
+
+    protected override void OnTaskOperational()
+    {
+        ShowHint(operationalText);
+    }
+
+    protected override void OnTaskPerfected()
+    {
+        ShowHint(perfectedText);
+        Debug.Log($"[CleaningTask] Perfected: {name}");
+    }
+
+    public override void ResetForNewShift()
+    {
+        base.ResetForNewShift();
+        announcedStart = false;
+    }
+
+    private void ShowHint(string text)
+    {
+        if (taskHintText != null)
+            taskHintText.text = text;
+    }
+}
+```
 
 **Verify**
 
-- Same task works with **`PlayerTaskActor`**; later add **`BotTaskActor : MonoBehaviour, ITaskActor`** for automation.
+- Works with direct input (no actor assigned) and with `PlayerTaskActor` when assigned.
+- Task notifications appear during progress (optional UI ref).
 
 ---
 

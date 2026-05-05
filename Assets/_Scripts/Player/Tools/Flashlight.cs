@@ -12,22 +12,22 @@ public class Flashlight : MonoBehaviour
     [SerializeField] private float startingLightIntensity = 1f;
     [SerializeField] private float higherLightIntensity = 10f;
 
-    private Light light;
+    private Light lightObject;
 
     // Public property if other scripts need to check light state
-    public bool IsHighIntensity => light != null && light.intensity == higherLightIntensity;
-    public float CurrentIntensity => light != null ? light.intensity : 0f;
+    public bool IsHighIntensity => lightObject != null && lightObject.intensity == higherLightIntensity;
+    public float CurrentIntensity => lightObject != null ? lightObject.intensity : 0f;
 
     private void Start()
     {
-        light = GetComponentInChildren<Light>();
-        if (light != null)
+        lightObject = GetComponentInChildren<Light>();
+        if (lightObject != null)
         {
-            light.intensity = startingLightIntensity;
+            lightObject.intensity = startingLightIntensity;
         }
         else
         {
-            Debug.LogWarning("Flashlight: No Light component found in children!");
+            Debug.LogWarning("Flashlight: No LightObject component found in children!");
         }
     }
 
@@ -41,7 +41,7 @@ public class Flashlight : MonoBehaviour
 
     private void ToggleIntensity()
     {
-        if (light == null) return;
+        if (GetComponent<Light>() == null) return;
         
         // Play sound
         if (playerAudio != null && flashlightClick != null)
@@ -50,13 +50,13 @@ public class Flashlight : MonoBehaviour
         }
 
         // Toggle flashlight intensity
-        if (light.intensity == startingLightIntensity)
+        if (GetComponent<Light>().intensity == startingLightIntensity)
         {
-            light.intensity = higherLightIntensity;
+            GetComponent<Light>().intensity = higherLightIntensity;
         }
         else
         {
-            light.intensity = startingLightIntensity;
+            GetComponent<Light>().intensity = startingLightIntensity;
         }
     }
 
@@ -65,9 +65,9 @@ public class Flashlight : MonoBehaviour
     /// </summary>
     public void SetHighIntensity()
     {
-        if (light != null)
+        if (GetComponent<Light>() != null)
         {
-            light.intensity = higherLightIntensity;
+            GetComponent<Light>().intensity = higherLightIntensity;
         }
     }
 
@@ -76,9 +76,9 @@ public class Flashlight : MonoBehaviour
     /// </summary>
     public void SetLowIntensity()
     {
-        if (light != null)
+        if (GetComponent<Light>() != null)
         {
-            light.intensity = startingLightIntensity;
+            GetComponent<Light>().intensity = startingLightIntensity;
         }
     }
 }

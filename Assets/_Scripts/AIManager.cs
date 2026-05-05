@@ -9,6 +9,8 @@ using UnityEngine;
 /// </summary>
 public class AIManager : MonoBehaviour
 {
+    [SerializeField] private StationManager stationManager;
+
     [Header("AI Personality")]
     [SerializeField] private float strictnessLevel = 1.0f;  // Increases over time
     [SerializeField] private float toleranceThreshold = 0.7f;  // Decreases over time
@@ -30,6 +32,9 @@ public class AIManager : MonoBehaviour
     void Start()
     {
         InitializeThresholds();
+
+        if (stationManager == null)
+            stationManager = StationManager.Instance;
     }
     
     void InitializeThresholds()
@@ -133,13 +138,10 @@ public class AIManager : MonoBehaviour
     
     float CalculateTimeScore(ShiftMetrics metrics)
     {
-        // Expected shift duration (10 minutes = 600 seconds)
-        float expectedDuration = 600f;
+        float expectedDuration = stationManager != null ? stationManager.ShiftDurationSeconds : 600f;
         float duration = metrics.GetShiftDuration();
-        
-        // Optimal is completing close to expected time
-        float deviation = Mathf.Abs(duration - expectedDuration) / expectedDuration;
-        
+
+        float deviation = Mathf.Abs(duration - expectedDuration) / Mathf.Max(1f, expectedDuration);
         return Mathf.Clamp01(1.0f - deviation);
     }
     

@@ -25,6 +25,9 @@ public class ShiftEvaluationUI : MonoBehaviour
     [SerializeField] private Color adequateColor = new Color(1f, 1f, 0.3f);       // Yellow
     [SerializeField] private Color poorColor = new Color(1f, 0.6f, 0.2f);         // Orange
     [SerializeField] private Color badColor = new Color(1f, 0.2f, 0.2f);          // Red
+
+    [SerializeField] private float typewriterCharsPerSecond = 48f;
+    private Coroutine typewriterRoutine;
     
     private bool isShowing = false;
 
@@ -86,39 +89,35 @@ public class ShiftEvaluationUI : MonoBehaviour
             Debug.LogError("[ShiftEvaluationUI] Evaluation panel not assigned!");
             return;
         }
-        
+
         isShowing = true;
-        
-        // Show cursor for clicking button
+
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
-        
-        // Pause game
         Time.timeScale = 0f;
-        
-        // Display classification with color
+
         if (classificationText != null)
         {
             classificationText.text = evaluation.classification;
             classificationText.color = GetClassificationColor(evaluation.overallScore);
         }
-        
-        // Display report
+
+        // Typewriter report text (realtime because timescale is 0 during review)
         if (reportText != null)
         {
-            reportText.text = evaluation.message;
+            if (typewriterRoutine != null)
+                StopCoroutine(typewriterRoutine);
+
+            typewriterRoutine = StartCoroutine(TypewriteReport(evaluation.message));
         }
-        
-        // Display observations
+
         if (observationsText != null)
         {
             if (evaluation.observations != null && evaluation.observations.Count > 0)
             {
                 string obsText = "OBSERVATIONS:\n";
                 foreach (string obs in evaluation.observations)
-                {
                     obsText += $"• {obs}\n";
-                }
                 observationsText.text = obsText;
             }
             else
@@ -126,11 +125,47 @@ public class ShiftEvaluationUI : MonoBehaviour
                 observationsText.text = "OBSERVATIONS:\nNone.";
             }
         }
-        
-        // Show panel
+
         evaluationPanel.SetActive(true);
-        
         Debug.Log($"[ShiftEvaluationUI] Showing evaluation: {evaluation.classification}");
+    }
+
+    private IEnumerator TypewriteReport(string fullText)
+    {
+        if (reportText == null)
+            yield break;
+
+        reportText.text = "";
+        float delay = 1f / Mathf.Max(0.01f, typewriterCharsPerSecond);
+
+        int n = fullText != null ? fullText.Length : 0;
+        for (int i = 0; i <= n; i++)
+        {
+            reportText.text = fullText.Substring(0, i);
+            yield return new WaitForSecondsRealtime(delay);
+        }
+
+        typewriterRoutine = null;
+    }
+
+    public void HideEvaluation()
+    {
+        if (typewriterRoutine != null)
+        {
+            StopCoroutine(typewriterRoutine);
+            typewriterRoutine = null;
+        }
+
+        isShowing = false;
+
+        if (evaluationPanel != null)
+            evaluationPanel.SetActive(false);
+
+        Time.timeScale = 1f;
+        Cursor.visible = false;
+        Cursor.lockState = CursorLockMode.Locked;
+
+        Debug.Log("[ShiftEvaluationUI] Evaluation hidden");
     }
 
     /// <summary>
@@ -157,28 +192,6 @@ public class ShiftEvaluationUI : MonoBehaviour
         {
             StationManager.Instance.ContinueToNextShift();
         }
-    }
-
-    /// <summary>
-    /// Hide the evaluation panel
-    /// </summary>
-    public void HideEvaluation()
-    {
-        isShowing = false;
-        
-        if (evaluationPanel != null)
-        {
-            evaluationPanel.SetActive(false);
-        }
-        
-        // Resume game
-        Time.timeScale = 1f;
-        
-        // Lock cursor again
-        Cursor.visible = false;
-        Cursor.lockState = CursorLockMode.Locked;
-        
-        Debug.Log("[ShiftEvaluationUI] Evaluation hidden");
     }
 
     /// <summary>
