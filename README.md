@@ -1,26 +1,37 @@
-# Project Skeleton — Milestone 0
+# Project Skeleton
 
-This Unity project is reset to **Milestone 0** from the portfolio plan: a **fixed-timestep simulation loop** with **pause** and **step one tick**, and **no agents, fields, HUD, or JSON** yet.
+A first-person shift-work evaluation game: keep a station's power and oxygen
+systems running across timed shifts while an indifferent corporate AI scores your
+performance and quietly raises its standards every shift.
 
-## Folders (for upcoming milestones)
+**Origin:** co-developed with Asaf as a Unity course capstone
+(`Prototype_Test_Janitor`); this repo is the restructured, expanded continuation.
 
-| Folder | Planned use |
-|--------|-------------|
-| `SimulationCore/` | Clock + simulation driver (started here) |
-| `Spatial/` | Uniform grid / neighbor queries (Milestone 1) |
-| `Cells/` | Data-oriented agents (Milestone 2) |
-| `Molecules/` | Scalar field (Milestone 3) |
-| `Visualization/` | Debug draw / heatmap later (Milestone 8) |
-| `Config/` | JSON/XML scenarios (Milestone 9) |
+## Stack
 
-## How to verify (acceptance)
+- Unity (URP) — check `ProjectSettings/ProjectVersion.txt` for the exact editor
+  version and match it before opening the project.
 
-1. Open `Assets/Scenes/SampleScene` and press **Play**.
-2. A GameObject **Simulation (Milestone 0)** appears with **`SimulationControllerBehaviour`** (or add that component yourself on any GameObject and disable duplicate roots).
-3. In the Inspector, **`Simulation Tick`** increases at ~50 ticks per real second when **`Paused`** is unchecked (`Fixed Delta Time` default `0.02` s).
-4. Check **`Paused`** — tick stops increasing.
-5. Right‑click **`SimulationControllerBehaviour`** → **Step one fixed tick** — tick advances by 1 while paused.
+## How to play
 
-## Next steps
+1. Open `Assets/Scenes/PrototypeScene 1.unity` and press Play.
+2. Accept a shift from the home screen.
+3. Keep the Power room (fuse-board puzzle) and Oxygen room (tank disposal puzzle)
+   stocked, work the workstation, and complete any manual tasks in range
+   (hold **E**; hold **Space** at the same time to pause progress without losing
+   it).
+4. When the shift timer runs out — or you end it manually — read the AI's
+   evaluation and continue to the next shift.
 
-Implement **Milestone 1** in `Spatial/` (grid + pooled lists + neighbor query), then wire it from `SimulateOneFixedTick` when you are ready.
+## Docs
+
+- [`PORTFOLIO_CONTEXT.md`](PORTFOLIO_CONTEXT.md) — design/portfolio decisions and
+  narrative framing.
+- [`DROP_IN_IMPLEMENTATION_GUIDE.md`](DROP_IN_IMPLEMENTATION_GUIDE.md) — step-by-step
+  implementation guide and status.
+- [`CLAUDE.md`](CLAUDE.md) — working context for continuing development.
+
+## Credits
+
+Original prototype co-developed with Asaf. Continued systems work (AI evaluation,
+manual tasks, resource metrics) by Dor Nudel.
