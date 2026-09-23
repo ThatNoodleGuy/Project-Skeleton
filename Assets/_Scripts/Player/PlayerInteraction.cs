@@ -137,7 +137,7 @@ public class PlayerInteraction : MonoBehaviour
     /// </summary>
     OxygenTank FindClosestInteractable()
     {
-        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+        Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
         OxygenTank closestTank = null;
         float closestDistance = interactionRange;
         
@@ -174,17 +174,17 @@ public class PlayerInteraction : MonoBehaviour
         // Method 3: Fallback for objects at player's feet
         // Check for objects in a small sphere around the player (helpful when looking straight down)
         Collider[] nearbyColliders = Physics.OverlapSphere(
-            playerCamera.transform.position + playerCamera.transform.forward * 0.5f, 
-            pickupRadius * 2f, 
+            ray.origin + ray.direction * 0.5f,
+            pickupRadius * 2f,
             interactableLayer
         );
-        
+
         foreach (Collider col in nearbyColliders)
         {
             OxygenTank tank = col.GetComponent<OxygenTank>();
             if (tank != null && tank.CanInteract(transform.position))
             {
-                float distance = Vector3.Distance(playerCamera.transform.position, col.transform.position);
+                float distance = Vector3.Distance(ray.origin, col.transform.position);
                 if (distance < closestDistance)
                 {
                     closestTank = tank;
@@ -201,7 +201,7 @@ public class PlayerInteraction : MonoBehaviour
     /// </summary>
     FuseSwitch FindClosestFuseSwitch()
     {
-        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+        Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
         
         // Simple raycast for switches (they're usually on walls, don't need sphere cast)
         RaycastHit hit;
@@ -383,9 +383,9 @@ public class PlayerInteraction : MonoBehaviour
     void DrawDebugRays()
     {
         if (playerCamera == null) return;
-        
-        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
-        
+
+        Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
+
         // Check if we're hitting something
         RaycastHit hit;
         bool isHitting = Physics.Raycast(ray, out hit, interactionRange, interactableLayer);

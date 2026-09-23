@@ -59,8 +59,8 @@ public class CamerasManager : MonoBehaviour
         if (screenCamera != null) screenCamera.gameObject.SetActive(false);
         if (playerCamera != null) playerCamera.gameObject.SetActive(true);
 
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
 
         if (player != null)
         {
