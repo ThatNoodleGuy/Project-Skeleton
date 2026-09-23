@@ -2,7 +2,9 @@ using UnityEngine;
 
 /// <summary>
 /// Hold-to-work manual task: progress 0→1, operational threshold (~75%), perfected at 100%.
-/// Wires into ShiftMetrics only while a shift is active. Use a trigger collider + "Player" tag.
+/// Wires into ShiftMetrics only while a shift is active. Use a trigger collider; range is
+/// granted to the "Player"-tagged object (raw key input) or to any collider carrying an
+/// ITaskActor component (e.g. NPCTaskActor), whichever enters.
 /// Subclass (e.g. CleaningTask) for VFX/UI; override hooks instead of duplicating progress logic.
 /// </summary>
 [RequireComponent(typeof(Collider))]
@@ -19,13 +21,15 @@ public class TaskBehavior : MonoBehaviour
     [SerializeField] private bool useSoftCancel = true;
 
     [Header("Actor (optional)")]
+    [Tooltip("Explicit override: if set, this actor is always used regardless of what enters the trigger. Leave empty to auto-resolve per entering collider (player key input, or any ITaskActor component such as NPCTaskActor).")]
     [SerializeField] private MonoBehaviour taskActorBehaviour;
 
     [Header("State")]
     [SerializeField] [Range(0f, 1f)] private float progress;
     [SerializeField] private bool taskCompleted;
 
-    private ITaskActor taskActor;
+    private ITaskActor forcedActor;
+    private ITaskActor activeActor;
     private Collider col;
     private bool isPlayerInRange;
     private bool hasLoggedAttemptThisShift;
@@ -40,7 +44,7 @@ public class TaskBehavior : MonoBehaviour
         if (col != null && !col.isTrigger)
             Debug.LogWarning($"[TaskBehavior] {name}: collider should be IsTrigger for range detection.");
 
-        taskActor = taskActorBehaviour as ITaskActor;
+        forcedActor = taskActorBehaviour as ITaskActor;
     }
 
     protected virtual void Update()
@@ -50,9 +54,11 @@ public class TaskBehavior : MonoBehaviour
         if (!isPlayerInRange || !CanReceiveInput())
             return;
 
-        bool interactHeld = taskActor != null ? taskActor.WantsInteractHold(this) : Input.GetKey(interactKey);
+        ITaskActor actor = forcedActor ?? activeActor;
+
+        bool interactHeld = actor != null ? actor.WantsInteractHold(this) : Input.GetKey(interactKey);
         bool cancelHeld = useSoftCancel &&
-                          (taskActor != null ? taskActor.WantsCancelHold(this) : Input.GetKey(cancelKey));
+                          (actor != null ? actor.WantsCancelHold(this) : Input.GetKey(cancelKey));
 
         if (interactHeld && !cancelHeld)
         {
@@ -120,18 +126,27 @@ public class TaskBehavior : MonoBehaviour
         return $"{gameObject.name}_{GetInstanceID()}";
     }
 
+    // Single-occupant assumption: if a second actor enters while one is already in
+    // range, whichever leaves first clears range for both. Matches this prototype's
+    // existing single-player-in-room simplification elsewhere (e.g. RoomController).
     private void OnTriggerEnter(Collider other)
     {
-        if (!other.CompareTag("Player"))
+        ITaskActor enteringActor = other.GetComponent<ITaskActor>();
+        if (enteringActor == null && !other.CompareTag("Player"))
             return;
+
+        activeActor = enteringActor;
         isPlayerInRange = true;
     }
 
     private void OnTriggerExit(Collider other)
     {
-        if (!other.CompareTag("Player"))
+        ITaskActor exitingActor = other.GetComponent<ITaskActor>();
+        if (exitingActor == null && !other.CompareTag("Player"))
             return;
+
         isPlayerInRange = false;
+        activeActor = null;
         if (!taskCompleted)
         {
             progress = 0f;

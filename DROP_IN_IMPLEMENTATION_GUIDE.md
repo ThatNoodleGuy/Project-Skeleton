@@ -26,7 +26,7 @@ Use this row to see **what this guide’s reference tree already contains in cod
 | **6.5** | **A–C done** in reference code; **D** points to **Step 7** (still open). |
 | **7** | **Not in code** — `ShiftEvaluationUI` sets full report string at once; no `TypewriteReport` / `WaitForSecondsRealtime` yet. |
 | **8** | **Not in code** — `AIManager.CalculateTimeScore` still hard-codes `600f`; `StationManager.ShiftDurationSeconds` exists for a future wire-up. |
-| **9** | **Not in code** — no `ITaskActor` / `PlayerTaskActor` in reference tree. |
+| **9** | **Done** — `ITaskActor` / `PlayerTaskActor` exist; `TaskBehavior` now auto-resolves the acting `ITaskActor` from whichever collider enters its trigger (falls back to raw player input if `taskActorBehaviour` is unset and no `ITaskActor` component is found). `NPCTaskActor` (`Assets/_Scripts/Tasks/NPCTaskActor.cs`) is the first non-player implementation — walks to an assigned `TaskBehavior` and holds interact once in range, demonstrating the swap. |
 | **10** | **Optional** — root `README.md` when you ship publicly. |
 
 **Also in reference tree:** `Assets/_Scripts/Tasks/CleaningTask.cs` (minimal subclass of `TaskBehavior`).
